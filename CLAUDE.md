@@ -1,51 +1,78 @@
-# yt-audio-downloader
+# 100procent – ljud-nedladdare med RSS-flöde
 
-En webbapp för Synology NAS (Apache + PHP 8) som extraherar ljud (MP3) från videolänkar via yt-dlp.
+En webbapp för Synology NAS (Apache + PHP 8) som extraherar ljud från videolänkar via yt-dlp och exponerar resultatet både som webblista och som podcast-RSS.
 
 ## Arkitektur
 
 ```
-index.html          # Frontend – formulär + polling-loop (vanilla JS)
-api/start.php       # Tar emot URL, skapar jobb-JSON, startar worker.php i bakgrunden
-api/worker.php      # CLI-only – kör yt-dlp, uppdaterar jobb-JSON med status/resultat
-api/status.php      # Pollas av frontend var 2:a sekund, returnerar jobb-JSON
-audio/              # MP3-filer (skapas automatiskt av worker.php)
-jobs/               # Jobb-JSON-filer (skapas automatiskt, rensas efter 1h)
-jobs/.htaccess      # Blockerar direktåtkomst
+index.php        # UI + PHP-sida som listar nedladdade filer och städar skräp
+download.php     # POST-endpoint: start / check / delete (ingen separat worker)
+rss.php          # RSS 2.0-flöde (iTunes-namespace) över samma filer
+downloads/       # Ljudfiler + dolda jobb-statusfiler (skapas automatiskt)
 ```
+
+Ingen databas, ingen separat worker-fil, ingen jobs-mapp – all jobbstatus lever som **dolda filer** (dot-prefix) i `downloads/` och rensas automatiskt.
+
+## Flödet
+
+1. `download.php` POST utan action: validerar URL, (för 100.se: skrapar og:image för BunnyCDN-HLS + og:title), genererar `$jobId = bin2hex(random_bytes(8))`, returnerar omedelbart med `{job_id, pending: true}`.
+2. I bakgrunden via `nohup sh -c '…' &`:
+   - `yt-dlp` laddar ner video till `<jobId>.mp4`
+   - `ffmpeg -acodec copy` extraherar ljudspåret till `<jobId>.m4a` (ingen omkodning)
+   - `rm` mp4, `touch .<jobId>.done`
+   - Vid fel: `grep -o "ERROR:.*"` från loggen till `.<jobId>.err`
+3. Frontend pollar `download.php` med `action=check` var 3:e sekund.
+4. När `.done` hittas: om `.<jobId>.title` finns byter `check` namn på m4a:n till säker titel, annars lämnas `<jobId>.m4a`.
 
 ## Viktiga beslut
 
-- **Asynkron** – worker.php körs via `exec(...&)` och PHP-requestet returnerar omedelbart med ett `job_id`
-- **Jobbfiler** – status spåras i `jobs/<job_id>.json`, inte i databas eller session
-- **Filnamnsstrategi** – output-template prefixas med `job_id` så worker kan hitta den producerade MP3:n med `glob()`
-- **Rensning** – `status.php` rensar jobbfiler äldre än 1h vid varje anrop; MP3-filer rensas inte automatiskt
+- **Två-stegsnedladdning (mp4 → m4a via `-acodec copy`)** i stället för yt-dlp-inbyggd `-x --audio-format mp3` – undviker omkodning, bevarar källkvalitet, snabbare på NAS:ens svaga CPU.
+- **Dolda jobbfiler i `downloads/`** (`.log`, `.err`, `.done`, `.title`) i stället för en `jobs/`-mapp – en enda rensningsrutin, inga extra .htaccess-blockeringar behövs (dolda filer filtreras bort i listningen).
+- **Polling via `check` med `.done`-sentinel** – `.done` skapas *efter* ffmpeg, så klienten ser aldrig en halv fil.
+- **Hängnings-detektion**: om `.log` inte rörts på 10 min rapporteras jobbet som misslyckat.
+- **100.se-scraping** pekar direkt på `360p/video.m3u8`-subströmmen, inte master-playlisten – undviker att yt-dlp laddar ner högsta kvaliteten i onödan.
+- **Filnamnsstrategi**: jobId används som temporärt filnamn under körning. Titeln saneras (`[^a-zA-Z0-9åäöÅÄÖ_-]` → `_`) och skrivs till `.<jobId>.title`; byte sker i `check` efter `.done`.
+- **Städning vid varje index-laddning**: dolda filer > 24h, icke-ljudfiler > 1h (fångar yt-dlp-krascher som lämnat kvar mp4). Ljudfiler rensas aldrig automatiskt.
+- **RSS kräver inget admingränssnitt** – `rss.php` bygger bas-URL från `$_SERVER` och listar samma filer som `index.php`.
 
-## Sökvägar (Synology-specifika)
+## Sökvägar (Synology)
 
 ```php
-define('YT_DLP',      '/usr/local/bin/yt-dlp');
-define('FFMPEG_PATH', '/usr/local/bin/ffmpeg');
-define('AUDIO_DIR',   __DIR__ . '/../audio/');
-define('JOBS_DIR',    __DIR__ . '/../jobs/');
-define('WEB_AUDIO',   'audio/');   // Relativ URL från webbrot
+define('YTDLP_PATH',   '/volume1/@yt-dlp/yt-dlp');                  // wrapper-skript
+define('FFMPEG_PATH',  '/var/packages/ffmpeg7/target/bin/ffmpeg');  // SynoCommunity ffmpeg7
+define('DOWNLOADS_DIR', __DIR__ . '/downloads');
+define('DOWNLOADS_URL', 'downloads');
 ```
 
-Verifiera sökvägar med `which yt-dlp` och `which ffmpeg` på NAS:en.
+Verifiera med `which yt-dlp` och `/var/packages/ffmpeg7/target/bin/ffmpeg -version` på NAS:en. Sökvägarna är **duplicerade** mellan `index.php` och `download.php` – om de ändras måste båda filer uppdateras.
+
+## Filformat
+
+- **Accepterade i listning och RSS**: `mp3`, `m4a`, `ogg`, `opus`, `wav`
+- **Producerade av appen**: endast `m4a` (ljudspår kopierat ur mp4)
+- **MIME-mappning för RSS-enclosure** sker i `rss.php` via `match`.
+- `itunes:duration` är en **grov uppskattning** från filstorlek (`bytes / 16000`) – inte exakt.
 
 ## Kommandon
 
 ```bash
-# Testa att yt-dlp fungerar manuellt på NAS:en
-yt-dlp -x --audio-format mp3 --audio-quality 0 --no-playlist "https://example.com/video"
+# Testa yt-dlp manuellt
+/volume1/@yt-dlp/yt-dlp --downloader native --no-playlist \
+  --ffmpeg-location /var/packages/ffmpeg7/target/bin/ffmpeg \
+  -o /tmp/test.mp4 "https://example.com/video"
 
-# Kontrollera att Apache-användaren (http) kan skriva till audio/ och jobs/
-ls -la audio/ jobs/
+# Kontrollera att http-användaren kan skriva
+ls -la downloads/
+
+# Titta på ett pågående jobb
+tail -f downloads/.<jobId>.log
 ```
 
 ## Begränsningar
 
-- `shell_exec` / `exec` måste vara aktiverat i PHP (`disable_functions` i php.ini)
-- Apache-användaren `http` måste ha skrivrättigheter till `audio/` och `jobs/`
-- Ingen autentisering – exponera inte publikt utan lösenordsskydd
-- Inga playlists (`--no-playlist` flagga satt)
+- `exec` / `shell_exec` måste vara tillåtet i PHP (kolla `disable_functions`).
+- Apache-användaren `http` behöver skrivrättigheter till projektroten (downloads/ skapas runtime).
+- **Ingen autentisering** – exponera inte publikt utan lösenordsskydd/VPN.
+- `--no-playlist` satt i yt-dlp – playlists stöds inte.
+- 100.se-scrapern är bräcklig: om deras HTML-struktur (og:image/og:title meta-tags med BunnyCDN-URL) ändras slutar detekteringen fungera och man måste mata in en direkt-URL.
+- Två parallella jobb för samma URL blir två separata m4a-filer (olika jobId) – ingen dedup.

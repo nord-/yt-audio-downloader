@@ -1,6 +1,5 @@
-# Nedladdade filer och jobbdata – ska inte versionshanteras
-audio/
-jobs/*.json
+# Nedladdade filer och jobb-state (skapas runtime av appen)
+downloads/
 
 # OS-filer
 .DS_Store
