@@ -19,6 +19,7 @@ define('JOBS_DIR',   __DIR__ . '/../jobs/');
 define('WEB_AUDIO',  'audio/');
 define('YT_DLP',     '/usr/local/bin/yt-dlp');
 define('FFMPEG_PATH', '/usr/local/bin/ffmpeg');
+define('WRITE_THROTTLE_SECONDS', 2);
 
 $job_file = JOBS_DIR . $job_id . '.json';
 
@@ -34,30 +35,73 @@ function update_job(string $job_file, array $data): void {
 }
 
 update_job($job_file, array_merge($job, [
-    'status'  => 'running',
-    'message' => 'Laddar ner och konverterar...',
+    'status'   => 'running',
+    'message'  => 'Startar nedladdning...',
+    'phase'    => 'download',
+    'progress' => 0,
 ]));
 
-// Get a unique temp filename prefix based on job_id to find the output file later
 $temp_prefix = AUDIO_DIR . $job_id . '_';
-
-// Use job_id as part of the output template so we can locate the file reliably
 $output_template = $temp_prefix . '%(title)s.%(ext)s';
 
+// --newline forces progress lines to be terminated with \n instead of \r,
+// so we can read them incrementally via fgets()
 $cmd = sprintf(
-    '%s -x --audio-format mp3 --audio-quality 0 --no-playlist --ffmpeg-location %s -o %s %s 2>&1',
+    '%s -x --audio-format mp3 --audio-quality 0 --no-playlist --newline --ffmpeg-location %s -o %s %s 2>&1',
     escapeshellarg(YT_DLP),
     escapeshellarg(FFMPEG_PATH),
     escapeshellarg($output_template),
     escapeshellarg($url)
 );
 
-$output   = [];
-$exit_code = 0;
-exec($cmd, $output, $exit_code);
+$handle = popen($cmd, 'r');
+if (!$handle) {
+    update_job($job_file, array_merge($job, [
+        'status'  => 'error',
+        'message' => 'Kunde inte starta yt-dlp.',
+    ]));
+    exit(1);
+}
+
+$last_write = 0;
+$phase      = 'download';
+$progress   = 0.0;
+$last_lines = [];
+
+while (!feof($handle)) {
+    $line = fgets($handle);
+    if ($line === false) break;
+    $line = rtrim($line);
+    if ($line === '') continue;
+
+    $last_lines[] = $line;
+    if (count($last_lines) > 5) array_shift($last_lines);
+
+    if (preg_match('/^\[download\]\s+([\d.]+)%/', $line, $m)) {
+        $progress = (float)$m[1];
+    } elseif (preg_match('/^\[(ExtractAudio|ffmpeg|Fixup)/', $line)) {
+        $phase = 'convert';
+    }
+
+    $now = time();
+    if ($now - $last_write >= WRITE_THROTTLE_SECONDS) {
+        $last_write = $now;
+        $msg = $phase === 'convert'
+            ? 'Konverterar till MP3...'
+            : sprintf('Hämtar: %.0f %%', $progress);
+        update_job($job_file, array_merge($job, [
+            'status'   => 'running',
+            'message'  => $msg,
+            'phase'    => $phase,
+            'progress' => $progress,
+        ]));
+    }
+}
+
+$exit_code = pclose($handle);
 
 if ($exit_code !== 0) {
-    $error_msg = implode(' ', array_slice($output, -3)); // last 3 lines
+    $error_msg = implode(' | ', array_slice($last_lines, -3));
     update_job($job_file, array_merge($job, [
         'status'  => 'error',
         'message' => $error_msg ?: 'yt-dlp misslyckades.',
@@ -65,7 +109,6 @@ if ($exit_code !== 0) {
     exit(1);
 }
 
-// Find the produced mp3 file (prefix is unique to this job)
 $files = glob($temp_prefix . '*.mp3');
 if (empty($files)) {
     update_job($job_file, array_merge($job, [
@@ -76,14 +119,14 @@ if (empty($files)) {
 }
 
 $filepath = $files[0];
-$filename  = basename($filepath);
-
-// Extract the title (strip our job_id prefix)
-$title = preg_replace('/^[a-f0-9]{16}_/', '', pathinfo($filename, PATHINFO_FILENAME));
+$filename = basename($filepath);
+$title    = preg_replace('/^[a-f0-9]{16}_/', '', pathinfo($filename, PATHINFO_FILENAME));
 
 update_job($job_file, array_merge($job, [
     'status'   => 'done',
     'message'  => 'Klar!',
+    'phase'    => 'done',
+    'progress' => 100,
     'title'    => $title,
     'filename' => $filename,
     'file_url' => WEB_AUDIO . rawurlencode($filename),

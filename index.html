@@ -237,6 +237,7 @@
 
           if (data.status === 'pending' || data.status === 'running') {
             setStatus('working', '⏳ ' + (data.message || 'Laddar ner...'));
+            updateProgress(data.phase, data.progress);
 
           } else if (data.status === 'done') {
             clearInterval(pollInterval);
@@ -259,6 +260,18 @@
           resetUI();
         }
       }, 2000);
+    }
+
+    function updateProgress(phase, progress) {
+      const bar = document.getElementById('progressBar');
+      const fill = document.getElementById('progressFill');
+      if (phase === 'download' && typeof progress === 'number' && progress > 0) {
+        bar.classList.remove('indeterminate');
+        fill.style.width = progress + '%';
+      } else {
+        bar.classList.add('indeterminate');
+        fill.style.width = '';
+      }
     }
 
     function showDownloadLink(url, filename) {
