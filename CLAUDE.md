@@ -6,30 +6,45 @@ En webbapp för Synology NAS (Apache + PHP 8) som extraherar ljud från videolä
 
 ```
 index.php        # UI + PHP-sida som listar nedladdade filer och städar skräp
-download.php     # POST-endpoint: start / check / delete (ingen separat worker)
+download.php     # POST-endpoint: start / check / delete
+worker.php       # CLI-only bakgrundsjobb – yt-dlp + ffmpeg, streamar progress
 rss.php          # RSS 2.0-flöde (iTunes-namespace) över samma filer
 downloads/       # Ljudfiler + dolda jobb-statusfiler (skapas automatiskt)
 ```
 
-Ingen databas, ingen separat worker-fil, ingen jobs-mapp – all jobbstatus lever som **dolda filer** (dot-prefix) i `downloads/` och rensas automatiskt.
+Ingen databas, ingen jobs-mapp – all jobbstatus lever som **dolda filer** (dot-prefix) i `downloads/` och rensas automatiskt.
 
 ## Flödet
 
-1. `download.php` POST utan action: validerar URL, (för 100.se: skrapar og:image för BunnyCDN-HLS + og:title), genererar `$jobId = bin2hex(random_bytes(8))`, returnerar omedelbart med `{job_id, pending: true}`.
-2. I bakgrunden via `nohup sh -c '…' &`:
-   - `yt-dlp` laddar ner video till `<jobId>.mp4`
-   - `ffmpeg -acodec copy` extraherar ljudspåret till `<jobId>.m4a` (ingen omkodning)
-   - `rm` mp4, `touch .<jobId>.done`
-   - Vid fel: `grep -o "ERROR:.*"` från loggen till `.<jobId>.err`
-3. Frontend pollar `download.php` med `action=check` var 3:e sekund.
+1. `download.php` POST utan action: validerar URL, (för 100.se: skrapar og:image för BunnyCDN-HLS + og:title), genererar `$jobId = bin2hex(random_bytes(8))`, startar `worker.php` via `nohup php worker.php <jobId> <url> &` och returnerar omedelbart `{job_id, pending: true}`.
+2. `worker.php` (CLI) kör:
+   - `popen()` på yt-dlp med `--newline` → läser progress-rader ("[download] 12.3% of …") löpande.
+   - Varje ny procent-siffra skrivs throttlat (max var 2:a sek) till `.<jobId>.progress` som JSON via tmp+rename (atomiskt).
+   - När yt-dlp är klar: sätter `phase=convert` i progress-filen, kör `ffmpeg -acodec copy` för ljudspåret.
+   - Vid lyckat slut: städar upp och `touch .<jobId>.done`.
+   - Vid fel: skriver meddelande till `.<jobId>.err`, tar bort progress-filen.
+3. Frontend pollar `download.php?action=check` var 2:a sek. `check` läser `.err` → `.done` → `.progress` i tur och ordning och returnerar `{error}`, `{done, filename}` eller `{done: false, phase, percent}`.
 4. När `.done` hittas: om `.<jobId>.title` finns byter `check` namn på m4a:n till säker titel, annars lämnas `<jobId>.m4a`.
+
+## Progress-UI
+
+Frontend växlar mellan **determinate bar** (procent under `phase=download`) och **indeterminate bar** (animation under `phase=convert`). Sentinel-filer i `downloads/` per jobb:
+
+- `.<jobId>.progress` – JSON `{phase, percent, updated_at}`, atomiskt skriven av worker
+- `.<jobId>.log` – stdout+stderr från yt-dlp och ffmpeg (för debug)
+- `.<jobId>.err` – felmeddelande (bara om fel uppstår)
+- `.<jobId>.done` – tom sentinel, sätts sist av worker
+- `.<jobId>.title` – skrivs av download.php (om 100.se-scrape lyckades), används vid rename
 
 ## Viktiga beslut
 
 - **Två-stegsnedladdning (mp4 → m4a via `-acodec copy`)** i stället för yt-dlp-inbyggd `-x --audio-format mp3` – undviker omkodning, bevarar källkvalitet, snabbare på NAS:ens svaga CPU.
-- **Dolda jobbfiler i `downloads/`** (`.log`, `.err`, `.done`, `.title`) i stället för en `jobs/`-mapp – en enda rensningsrutin, inga extra .htaccess-blockeringar behövs (dolda filer filtreras bort i listningen).
+- **CLI-worker via popen() i stället för shell-pipeline** – tidigare kedjades yt-dlp och ffmpeg med `&& ... ||` i en lång `nohup sh -c`. Det gjorde att vi inte kunde parsa yt-dlps progress. Nu: `worker.php` läser stdout rad för rad och skriver strukturerad status.
+- **Throttling (2 sek) på progress-writes** – undviker att skriva 20+ gånger/sek vid snabba nedladdningar. Matchar frontendens pollintervall.
+- **Atomisk JSON-write (tmp + rename)** – frontend kan aldrig läsa en halvskriven progress-fil.
+- **Dolda jobbfiler i `downloads/`** (`.log`, `.err`, `.done`, `.progress`, `.title`) i stället för en `jobs/`-mapp – en enda rensningsrutin, inga extra .htaccess-blockeringar behövs (dolda filer filtreras bort i listningen).
 - **Polling via `check` med `.done`-sentinel** – `.done` skapas *efter* ffmpeg, så klienten ser aldrig en halv fil.
-- **Hängnings-detektion**: om `.log` inte rörts på 10 min rapporteras jobbet som misslyckat.
+- **Hängnings-detektion**: om progress-filens `updated_at` är äldre än 10 min rapporteras jobbet som misslyckat (worker har dött men progress-filen ligger kvar). Saknas progress-filen helt används `.log`-mtime som fallback-livstecken.
 - **100.se-scraping** pekar direkt på `360p/video.m3u8`-subströmmen, inte master-playlisten – undviker att yt-dlp laddar ner högsta kvaliteten i onödan.
 - **Filnamnsstrategi**: jobId används som temporärt filnamn under körning. Titeln saneras (`[^a-zA-Z0-9åäöÅÄÖ_-]` → `_`) och skrivs till `.<jobId>.title`; byte sker i `check` efter `.done`.
 - **Städning vid varje index-laddning**: dolda filer > 24h, icke-ljudfiler > 1h (fångar yt-dlp-krascher som lämnat kvar mp4). Ljudfiler rensas aldrig automatiskt.
