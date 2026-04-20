@@ -12,6 +12,44 @@ if (!is_dir(DOWNLOADS_DIR)) {
     mkdir(DOWNLOADS_DIR, 0755, true);
 }
 
+// Fullfölj rename för jobb som blev klara medan klienten var borta.
+// Normalt sker renamet i download.php?action=check, men om användaren stängde
+// fliken mellan att worker skrev .done och nästa poll ligger sentinel-filerna
+// kvar och m4a:n heter fortfarande <jobId>.m4a.
+foreach (glob(DOWNLOADS_DIR . '/.*.done') as $doneFile) {
+    if (!preg_match('~/\.([a-f0-9]+)\.done$~', $doneFile, $m)) continue;
+    $jid       = $m[1];
+    $m4aFile   = DOWNLOADS_DIR . '/' . $jid . '.m4a';
+    $titleFile = DOWNLOADS_DIR . '/.' . $jid . '.title';
+    $descFile  = DOWNLOADS_DIR . '/.' . $jid . '.desc';
+    $imgFile   = DOWNLOADS_DIR . '/.' . $jid . '.jpg';
+    $finalBase = $jid;
+
+    if (is_file($m4aFile) && is_file($titleFile)) {
+        $rawTitle  = trim(file_get_contents($titleFile));
+        $safeTitle = preg_replace('/[^a-zA-Z0-9åäöÅÄÖ._-]/', '_', $rawTitle);
+        $safeTitle = preg_replace('/_+/', '_', trim($safeTitle, '_.'));
+        if ($safeTitle !== '') {
+            $newPath = DOWNLOADS_DIR . '/' . $safeTitle . '.m4a';
+            if (!file_exists($newPath) && @rename($m4aFile, $newPath)) {
+                $finalBase = $safeTitle;
+            }
+        }
+    }
+    if (is_file($titleFile)) {
+        @rename($titleFile, DOWNLOADS_DIR . '/' . $finalBase . '.title');
+    }
+    if (is_file($descFile)) {
+        @rename($descFile, DOWNLOADS_DIR . '/' . $finalBase . '.desc');
+    }
+    if (is_file($imgFile)) {
+        @rename($imgFile, DOWNLOADS_DIR . '/' . $finalBase . '.jpg');
+    }
+    @unlink($doneFile);
+    @unlink(DOWNLOADS_DIR . '/.' . $jid . '.log');
+    @unlink(DOWNLOADS_DIR . '/.' . $jid . '.progress');
+}
+
 // Städa bort gamla jobb-filer (dolda filer äldre än 24h)
 foreach (glob(DOWNLOADS_DIR . '/.*') as $hidden) {
     if (is_file($hidden) && (time() - filemtime($hidden)) > 86400) {
@@ -21,7 +59,7 @@ foreach (glob(DOWNLOADS_DIR . '/.*') as $hidden) {
 // Städa bort temp-videofiler som yt-dlp kan ha lämnat kvar vid krasch (äldre än 1h)
 foreach (glob(DOWNLOADS_DIR . '/*') as $f) {
     if (!is_file($f)) continue;
-    if (preg_match('/\.(mp3|m4a|ogg|opus|wav)$/i', $f)) continue;  // behåll färdiga ljudfiler
+    if (preg_match('/\.(mp3|m4a|ogg|opus|wav|title|desc|jpg|jpeg|png|webp)$/i', $f)) continue;  // behåll färdiga ljudfiler + sidecars
     if ((time() - filemtime($f)) > 3600) {
         @unlink($f);
     }

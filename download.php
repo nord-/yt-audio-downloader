@@ -28,6 +28,8 @@ if ($action === 'check') {
 
     $m4aFile   = DOWNLOADS_DIR . '/' . $jobId . '.m4a';
     $titleFile = DOWNLOADS_DIR . '/.' . $jobId . '.title';
+    $descFile  = DOWNLOADS_DIR . '/.' . $jobId . '.desc';
+    $imgFile   = DOWNLOADS_DIR . '/.' . $jobId . '.jpg';
     $logFile   = DOWNLOADS_DIR . '/.' . $jobId . '.log';
     $errFile   = DOWNLOADS_DIR . '/.' . $jobId . '.err';
     $doneFile  = DOWNLOADS_DIR . '/.' . $jobId . '.done';   // sätts EFTER ffmpeg är klar
@@ -37,6 +39,7 @@ if ($action === 'check') {
     if (file_exists($errFile)) {
         $errMsg = trim(file_get_contents($errFile));
         @unlink($errFile); @unlink($logFile); @unlink($progFile);
+        @unlink($titleFile); @unlink($descFile); @unlink($imgFile);
         echo json_encode(['done' => false, 'error' => $errMsg ?: 'Nedladdning misslyckades.']);
         exit;
     }
@@ -44,20 +47,34 @@ if ($action === 'check') {
     // Kolla om hela jobbet är klart (.done sätts av worker.php efter yt-dlp+ffmpeg)
     if (file_exists($doneFile)) {
         @unlink($doneFile);
-        $finalName = $jobId . '.m4a';
+        $finalBase = $jobId;
 
-        // Byt namn till titel om vi har en
+        // Byt namn till titel om vi har en. Sidecar innehåller rå titel;
+        // filsystem-safe variant härleds här så vi aldrig har ?/:/* i filnamn.
         if (file_exists($titleFile)) {
-            $safeTitle = trim(file_get_contents($titleFile));
-            $newPath   = DOWNLOADS_DIR . '/' . $safeTitle . '.m4a';
-            if (!file_exists($newPath) && @rename($m4aFile, $newPath)) {
-                $finalName = $safeTitle . '.m4a';
+            $rawTitle  = trim(file_get_contents($titleFile));
+            $safeTitle = preg_replace('/[^a-zA-Z0-9åäöÅÄÖ._-]/', '_', $rawTitle);
+            $safeTitle = preg_replace('/_+/', '_', trim($safeTitle, '_.'));
+            if ($safeTitle !== '') {
+                $newPath = DOWNLOADS_DIR . '/' . $safeTitle . '.m4a';
+                if (!file_exists($newPath) && @rename($m4aFile, $newPath)) {
+                    $finalBase = $safeTitle;
+                }
             }
-            @unlink($titleFile);
+            // Behåll sidecar bredvid ljudfilen — rss.php läser den som RSS-titel.
+            @rename($titleFile, DOWNLOADS_DIR . '/' . $finalBase . '.title');
+        }
+
+        // Flytta ingress + episodbild till synliga sidecars med samma basnamn som ljudfilen.
+        if (file_exists($descFile)) {
+            @rename($descFile, DOWNLOADS_DIR . '/' . $finalBase . '.desc');
+        }
+        if (file_exists($imgFile)) {
+            @rename($imgFile, DOWNLOADS_DIR . '/' . $finalBase . '.jpg');
         }
 
         @unlink($logFile);
-        echo json_encode(['done' => true, 'filename' => $finalName]);
+        echo json_encode(['done' => true, 'filename' => $finalBase . '.m4a']);
         exit;
     }
 
@@ -103,6 +120,11 @@ if ($action === 'delete') {
     $path = DOWNLOADS_DIR . '/' . $filename;
     if (realpath($path) !== false && strpos(realpath($path), realpath(DOWNLOADS_DIR)) === 0) {
         if (unlink($path)) {
+            // Rensa sidecars (.title, .desc, .jpg) med samma basnamn — annars ligger de kvar som skräp.
+            $base = pathinfo($filename, PATHINFO_FILENAME);
+            @unlink(DOWNLOADS_DIR . '/' . $base . '.title');
+            @unlink(DOWNLOADS_DIR . '/' . $base . '.desc');
+            @unlink(DOWNLOADS_DIR . '/' . $base . '.jpg');
             echo json_encode(['success' => true, 'id' => md5($filename)]);
         } else {
             echo json_encode(['success' => false, 'error' => 'Kunde inte ta bort filen.']);
@@ -159,16 +181,14 @@ function extract_100se(string $pageUrl): array {
 
     $result = [];
 
-    if (preg_match(
-        '~<meta[^>]+property="og:image"[^>]+content="https://(vz-[a-f0-9-]+\.b-cdn\.net)/([a-f0-9-]{36})/~',
-        $html, $m
-    ) || preg_match(
-        '~<meta[^>]+content="https://(vz-[a-f0-9-]+\.b-cdn\.net)/([a-f0-9-]{36})/[^"]*"[^>]+property="og:image"~',
-        $html, $m
-    )) {
+    if (preg_match('~<meta[^>]+property="og:image"[^>]+content="([^"]+)"~', $html, $m)
+     || preg_match('~<meta[^>]+content="([^"]+)"[^>]+property="og:image"~', $html, $m)) {
+        $result['image_url'] = $m[1];
         // Peka direkt på 360p-subströmmen (inte master-playlisten).
         // Undviker att yt-dlp väljer fel kvalitet eller laddar ner allt.
-        $result['url'] = "https://{$m[1]}/{$m[2]}/360p/video.m3u8";
+        if (preg_match('~^https://(vz-[a-f0-9-]+\.b-cdn\.net)/([a-f0-9-]{36})/~', $m[1], $mm)) {
+            $result['url'] = "https://{$mm[1]}/{$mm[2]}/360p/video.m3u8";
+        }
     }
 
     if (preg_match('~<meta[^>]+property="og:title"[^>]+content="([^"]+)"~', $html, $m)) {
@@ -177,24 +197,64 @@ function extract_100se(string $pageUrl): array {
         $result['title'] = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
     }
 
+    // 100.se lägger ingressen i og:description — används som RSS <description>.
+    if (preg_match('~<meta[^>]+property="og:description"[^>]+content="([^"]+)"~', $html, $m)) {
+        $result['description'] = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    } elseif (preg_match('~<meta[^>]+content="([^"]+)"[^>]+property="og:description"~', $html, $m)) {
+        $result['description'] = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    }
+
     return $result;
 }
 
 $downloadTitle = null;
+$downloadDesc  = null;
+$downloadImage = null;
 if (str_contains($url, '100.se')) {
     $extracted = extract_100se($url);
-    if (!empty($extracted['url']))   $url           = $extracted['url'];
-    if (!empty($extracted['title'])) $downloadTitle = $extracted['title'];
+    if (!empty($extracted['url']))         $url           = $extracted['url'];
+    if (!empty($extracted['title']))       $downloadTitle = $extracted['title'];
+    if (!empty($extracted['description'])) $downloadDesc  = $extracted['description'];
+    if (!empty($extracted['image_url']))   $downloadImage = $extracted['image_url'];
 }
 
 // Unikt jobb-ID — används som temporärt filnamn
 $jobId = bin2hex(random_bytes(8));
 
-// Spara titel för namnbyte när jobbet är klart
+// Spara rå titel — används både för filsystem-rename (saneras on-the-fly) och
+// som RSS-titel (original-text med frågetecken, punkter osv bevaras).
 if ($downloadTitle !== null) {
-    $safeTitle = preg_replace('/[^a-zA-Z0-9åäöÅÄÖ_-]/', '_', $downloadTitle);
-    $safeTitle = preg_replace('/_+/', '_', trim($safeTitle, '_'));
-    file_put_contents(DOWNLOADS_DIR . '/.' . $jobId . '.title', $safeTitle);
+    file_put_contents(DOWNLOADS_DIR . '/.' . $jobId . '.title', $downloadTitle);
+}
+
+// Spara ingress som sidecar — flyttas till <titel>.desc när jobbet är klart.
+if ($downloadDesc !== null) {
+    file_put_contents(DOWNLOADS_DIR . '/.' . $jobId . '.desc', $downloadDesc);
+}
+
+// Hämta episodbild lokalt — bilden följer då med även om källan försvinner.
+// Misslyckas tyst: bilden är trevlig-att-ha, inte kritisk för jobbet.
+if ($downloadImage !== null && function_exists('curl_init')) {
+    $imgPath = DOWNLOADS_DIR . '/.' . $jobId . '.jpg';
+    $fp      = fopen($imgPath, 'wb');
+    if ($fp) {
+        $ch = curl_init($downloadImage);
+        curl_setopt_array($ch, [
+            CURLOPT_FILE           => $fp,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_TIMEOUT        => 10,
+            CURLOPT_USERAGENT      => 'Mozilla/5.0',
+        ]);
+        $ok   = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        fclose($fp);
+        if (!$ok || $code >= 400 || filesize($imgPath) < 100) {
+            @unlink($imgPath);
+        }
+    }
 }
 
 // Starta worker.php i bakgrunden. Den sköter yt-dlp + ffmpeg och skriver
