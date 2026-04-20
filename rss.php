@@ -20,16 +20,16 @@ if (is_dir(DOWNLOADS_DIR)) {
         if (!preg_match('/\.(mp3|m4a|ogg|opus|wav)$/i', $item)) continue;
         $path = DOWNLOADS_DIR . '/' . $item;
         if (!is_file($path)) continue;
-        $ext = strtolower(pathinfo($item, PATHINFO_EXTENSION));
-        $base = pathinfo($item, PATHINFO_FILENAME);
-        $titlePath = DOWNLOADS_DIR . '/' . $base . '.title';
-        $descPath  = DOWNLOADS_DIR . '/' . $base . '.desc';
-        $imgPath   = DOWNLOADS_DIR . '/' . $base . '.jpg';
+        $ext       = strtolower(pathinfo($item, PATHINFO_EXTENSION));
+        $fileBase  = pathinfo($item, PATHINFO_FILENAME);
+        $titlePath = DOWNLOADS_DIR . '/' . $fileBase . '.title';
+        $descPath  = DOWNLOADS_DIR . '/' . $fileBase . '.desc';
+        $imgPath   = DOWNLOADS_DIR . '/' . $fileBase . '.jpg';
         // Rå titel från sidecar bevarar frågetecken, punkter och tecken som inte tål filsystem.
         // Fallback: härled titel från filnamnet (underscore → space) för filer utan sidecar.
-        $title       = is_file($titlePath) ? trim(file_get_contents($titlePath)) : str_replace('_', ' ', $base);
+        $title       = is_file($titlePath) ? trim(file_get_contents($titlePath)) : str_replace('_', ' ', $fileBase);
         $description = is_file($descPath)  ? trim(file_get_contents($descPath))  : '';
-        $imageUrl    = is_file($imgPath)   ? $downloadsBase . '/' . rawurlencode($base . '.jpg') : '';
+        $imageUrl    = is_file($imgPath)   ? $downloadsBase . '/' . rawurlencode($fileBase . '.jpg') : '';
         $files[] = [
             'name'     => $item,
             'title'    => $title,

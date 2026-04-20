@@ -62,15 +62,21 @@ if ($action === 'check') {
                 }
             }
             // Behåll sidecar bredvid ljudfilen — rss.php läser den som RSS-titel.
-            @rename($titleFile, DOWNLOADS_DIR . '/' . $finalBase . '.title');
+            // !file_exists-check: undvik att POSIX-rename skriver över en orphan-sidecar.
+            $destTitle = DOWNLOADS_DIR . '/' . $finalBase . '.title';
+            if (!file_exists($destTitle)) {
+                @rename($titleFile, $destTitle);
+            }
         }
 
         // Flytta ingress + episodbild till synliga sidecars med samma basnamn som ljudfilen.
-        if (file_exists($descFile)) {
-            @rename($descFile, DOWNLOADS_DIR . '/' . $finalBase . '.desc');
+        $destDesc = DOWNLOADS_DIR . '/' . $finalBase . '.desc';
+        if (file_exists($descFile) && !file_exists($destDesc)) {
+            @rename($descFile, $destDesc);
         }
-        if (file_exists($imgFile)) {
-            @rename($imgFile, DOWNLOADS_DIR . '/' . $finalBase . '.jpg');
+        $destImg = DOWNLOADS_DIR . '/' . $finalBase . '.jpg';
+        if (file_exists($imgFile) && !file_exists($destImg)) {
+            @rename($imgFile, $destImg);
         }
 
         @unlink($logFile);
@@ -234,7 +240,11 @@ if ($downloadDesc !== null) {
 
 // Hämta episodbild lokalt — bilden följer då med även om källan försvinner.
 // Misslyckas tyst: bilden är trevlig-att-ha, inte kritisk för jobbet.
-if ($downloadImage !== null && function_exists('curl_init')) {
+// Låser host till BunnyCDN-mönstret som 100.se faktiskt använder — förhindrar SSRF
+// eftersom og:image kommer från en sida som en angripare potentiellt kontrollerar
+// (str_contains($url,'100.se') är en svag filter).
+if ($downloadImage !== null && function_exists('curl_init')
+    && preg_match('~^https://vz-[a-f0-9-]+\.b-cdn\.net/~', $downloadImage)) {
     $imgPath = DOWNLOADS_DIR . '/.' . $jobId . '.jpg';
     $fp      = fopen($imgPath, 'wb');
     if ($fp) {
@@ -242,8 +252,9 @@ if ($downloadImage !== null && function_exists('curl_init')) {
         curl_setopt_array($ch, [
             CURLOPT_FILE           => $fp,
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_MAXREDIRS      => 3,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
             CURLOPT_TIMEOUT        => 10,
             CURLOPT_USERAGENT      => 'Mozilla/5.0',
         ]);

@@ -36,14 +36,19 @@ foreach (glob(DOWNLOADS_DIR . '/.*.done') as $doneFile) {
             }
         }
     }
-    if (is_file($titleFile)) {
-        @rename($titleFile, DOWNLOADS_DIR . '/' . $finalBase . '.title');
+    // !file_exists-check: undvik att POSIX-rename skriver över en orphan-sidecar
+    // med samma basnamn (extremt sällsynt, men kirurgisk fix på reviewer-request).
+    $destTitle = DOWNLOADS_DIR . '/' . $finalBase . '.title';
+    if (is_file($titleFile) && !file_exists($destTitle)) {
+        @rename($titleFile, $destTitle);
     }
-    if (is_file($descFile)) {
-        @rename($descFile, DOWNLOADS_DIR . '/' . $finalBase . '.desc');
+    $destDesc = DOWNLOADS_DIR . '/' . $finalBase . '.desc';
+    if (is_file($descFile) && !file_exists($destDesc)) {
+        @rename($descFile, $destDesc);
     }
-    if (is_file($imgFile)) {
-        @rename($imgFile, DOWNLOADS_DIR . '/' . $finalBase . '.jpg');
+    $destImg = DOWNLOADS_DIR . '/' . $finalBase . '.jpg';
+    if (is_file($imgFile) && !file_exists($destImg)) {
+        @rename($imgFile, $destImg);
     }
     @unlink($doneFile);
     @unlink(DOWNLOADS_DIR . '/.' . $jid . '.log');
