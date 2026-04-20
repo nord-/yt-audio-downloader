@@ -30,17 +30,18 @@ if ($action === 'check') {
     $titleFile = DOWNLOADS_DIR . '/.' . $jobId . '.title';
     $logFile   = DOWNLOADS_DIR . '/.' . $jobId . '.log';
     $errFile   = DOWNLOADS_DIR . '/.' . $jobId . '.err';
-    $doneFile  = DOWNLOADS_DIR . '/.' . $jobId . '.done';  // sätts EFTER ffmpeg är klar
+    $doneFile  = DOWNLOADS_DIR . '/.' . $jobId . '.done';   // sätts EFTER ffmpeg är klar
+    $progFile  = DOWNLOADS_DIR . '/.' . $jobId . '.progress';
 
     // Kolla om ett fel uppstod
     if (file_exists($errFile)) {
         $errMsg = trim(file_get_contents($errFile));
-        @unlink($errFile); @unlink($logFile);
+        @unlink($errFile); @unlink($logFile); @unlink($progFile);
         echo json_encode(['done' => false, 'error' => $errMsg ?: 'Nedladdning misslyckades.']);
         exit;
     }
 
-    // Kolla om hela jobbet är klart (.done sätts av nohup-kommandot efter yt-dlp+ffmpeg)
+    // Kolla om hela jobbet är klart (.done sätts av worker.php efter yt-dlp+ffmpeg)
     if (file_exists($doneFile)) {
         @unlink($doneFile);
         $finalName = $jobId . '.m4a';
@@ -60,9 +61,22 @@ if ($action === 'check') {
         exit;
     }
 
-    // Jobb pågår — kolla att det inte hängt (ingen logg-aktivitet på 10 min)
+    // Jobb pågår — läs progress-fil och returnera fas + procent
+    if (file_exists($progFile)) {
+        $prog = @json_decode(@file_get_contents($progFile), true);
+        if (is_array($prog) && isset($prog['phase'])) {
+            echo json_encode([
+                'done'    => false,
+                'phase'   => $prog['phase'],
+                'percent' => $prog['percent'] ?? 0,
+            ]);
+            exit;
+        }
+    }
+
+    // Progress-fil saknas — jobbet kan ha hängt (ingen aktivitet på 10 min)
     if (file_exists($logFile) && (time() - filemtime($logFile)) > 600) {
-        @unlink($logFile);
+        @unlink($logFile); @unlink($progFile);
         echo json_encode(['done' => false, 'error' => 'Nedladdningen tog för lång tid.']);
         exit;
     }
@@ -166,9 +180,7 @@ if (str_contains($url, '100.se')) {
 }
 
 // Unikt jobb-ID — används som temporärt filnamn
-$jobId   = bin2hex(random_bytes(8));
-$logFile = DOWNLOADS_DIR . '/.' . $jobId . '.log';
-$errFile = DOWNLOADS_DIR . '/.' . $jobId . '.err';
+$jobId = bin2hex(random_bytes(8));
 
 // Spara titel för namnbyte när jobbet är klart
 if ($downloadTitle !== null) {
@@ -177,43 +189,12 @@ if ($downloadTitle !== null) {
     file_put_contents(DOWNLOADS_DIR . '/.' . $jobId . '.title', $safeTitle);
 }
 
-$mp4File = DOWNLOADS_DIR . '/' . $jobId . '.mp4';
-$m4aFile = DOWNLOADS_DIR . '/' . $jobId . '.m4a';
-
-// Steg 1: yt-dlp laddar ner video till mp4
-$dlCmd = implode(' ', [
-    escapeshellarg(YTDLP_PATH),
-    '--downloader', 'native',
-    '--no-playlist',
-    '--restrict-filenames',
-    '--ffmpeg-location', escapeshellarg(FFMPEG_PATH),
-    '-o', escapeshellarg($mp4File),
-    escapeshellarg($url),
-]);
-
-// Steg 2: ffmpeg kopierar ljudspåret direkt ur mp4 till m4a (ingen omkodning)
-$ffCmd = implode(' ', [
-    escapeshellarg(FFMPEG_PATH),
-    '-y',
-    '-i', escapeshellarg($mp4File),
-    '-vn',
-    '-acodec', 'copy',
-    escapeshellarg($m4aFile),
-]);
-
-// Kör i bakgrunden med nohup så PHP kan returnera direkt.
-// .done-filen sätts först när båda stegen är klara.
-// Vid fel skrivs felmeddelandet till .err-filen.
-$doneFile = DOWNLOADS_DIR . '/.' . $jobId . '.done';
-$bgCmd = 'nohup sh -c '
-    . escapeshellarg(
-        $dlCmd . ' >> ' . escapeshellarg($logFile) . ' 2>&1'
-        . ' && ' . $ffCmd . ' >> ' . escapeshellarg($logFile) . ' 2>&1'
-        . ' && rm -f ' . escapeshellarg($mp4File)
-        . ' && touch ' . escapeshellarg($doneFile)
-        . ' || { grep -o "ERROR:.*" ' . escapeshellarg($logFile) . ' | tail -1 > ' . escapeshellarg($errFile) . '; rm -f ' . escapeshellarg($mp4File) . '; }'
-    )
-    . ' >> ' . escapeshellarg($logFile) . ' 2>&1 &';
+// Starta worker.php i bakgrunden. Den sköter yt-dlp + ffmpeg och skriver
+// progress-fil som frontend pollar via ?action=check.
+$bgCmd = 'nohup php ' . escapeshellarg(__DIR__ . '/worker.php')
+    . ' ' . escapeshellarg($jobId)
+    . ' ' . escapeshellarg($url)
+    . ' > /dev/null 2>&1 &';
 
 exec($bgCmd);
 

@@ -184,6 +184,47 @@ function formatBytes(int $bytes): string {
 
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        /* Progress bar */
+        .progress-wrap {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .progress-label {
+            display: block;
+            font-size: 0.85rem;
+            color: #93c5fd;
+            margin-bottom: 0.4rem;
+        }
+
+        .progress-track {
+            width: 100%;
+            height: 6px;
+            background: #0f172a;
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #6366f1;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .progress-track.indeterminate .progress-fill {
+            width: 40%;
+            position: absolute;
+            left: 0;
+            animation: indet 1.4s ease-in-out infinite;
+        }
+
+        @keyframes indet {
+            0%   { left: -40%; }
+            100% { left: 100%; }
+        }
+
         /* File list */
         .file-list {
             list-style: none;
@@ -353,13 +394,9 @@ async function startDownload() {
 }
 
 function pollJob(jobId) {
-    let dots = 0;
     clearInterval(pollTimer);
 
     pollTimer = setInterval(async () => {
-        dots = (dots + 1) % 4;
-        showStatus('loading', 'Laddar ner och konverterar' + '.'.repeat(dots + 1));
-
         try {
             const resp = await fetch('download.php', {
                 method: 'POST',
@@ -377,11 +414,17 @@ function pollJob(jobId) {
                 clearInterval(pollTimer);
                 document.getElementById('downloadBtn').disabled = false;
                 showStatus('error', '&#10007; Fel: ' + escHtml(data.error));
+            } else if (data.phase === 'download') {
+                showProgress('Laddar ner... ' + (data.percent ?? 0) + '%', data.percent ?? 0, false);
+            } else if (data.phase === 'convert') {
+                showProgress('Konverterar till ljud...', 100, true);
+            } else {
+                showProgress('Startar...', 0, true);
             }
         } catch (e) {
             // Tillfälligt nätverksfel — fortsätt polla
         }
-    }, 3000);
+    }, 2000);
 }
 
 async function deleteFile(filename) {
@@ -409,6 +452,20 @@ function showStatus(type, msg) {
     } else {
         el.innerHTML = msg;
     }
+}
+
+function showProgress(label, percent, indeterminate) {
+    const el = document.getElementById('status');
+    el.className = 'loading';
+    el.style.display = 'flex';
+    const trackClass = indeterminate ? 'progress-track indeterminate' : 'progress-track';
+    el.innerHTML =
+        '<div class="progress-wrap">' +
+            '<span class="progress-label">' + escHtml(label) + '</span>' +
+            '<div class="' + trackClass + '">' +
+                '<div class="progress-fill" style="width:' + percent + '%"></div>' +
+            '</div>' +
+        '</div>';
 }
 
 function escHtml(str) {
