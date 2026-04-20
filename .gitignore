@@ -1,0 +1,7 @@
+# Nedladdade filer och jobbdata – ska inte versionshanteras
+audio/
+jobs/*.json
+
+# OS-filer
+.DS_Store
+Thumbs.db
