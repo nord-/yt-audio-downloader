@@ -65,7 +65,7 @@ if (!$handle) {
 
 $last_write = 0;
 $phase      = 'download';
-$progress   = 0.0;
+$progress   = 0;
 $last_lines = [];
 
 while (!feof($handle)) {
@@ -78,7 +78,7 @@ while (!feof($handle)) {
     if (count($last_lines) > 5) array_shift($last_lines);
 
     if (preg_match('/^\[download\]\s+([\d.]+)%/', $line, $m)) {
-        $progress = (float)$m[1];
+        $progress = (int)round((float)$m[1]);
     } elseif (preg_match('/^\[(ExtractAudio|ffmpeg|Fixup)/', $line)) {
         $phase = 'convert';
     }
@@ -88,7 +88,7 @@ while (!feof($handle)) {
         $last_write = $now;
         $msg = $phase === 'convert'
             ? 'Konverterar till MP3...'
-            : sprintf('Hämtar: %.0f %%', $progress);
+            : sprintf('Hämtar: %d %%', $progress);
         update_job($job_file, array_merge($job, [
             'status'   => 'running',
             'message'  => $msg,
