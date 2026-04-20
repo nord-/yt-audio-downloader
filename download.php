@@ -208,9 +208,36 @@ function extract_100se(string $pageUrl): array {
         $result['description'] = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
     } elseif (preg_match('~<meta[^>]+content="([^"]+)"[^>]+property="og:description"~', $html, $m)) {
         $result['description'] = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    } else {
+        // Fallback: vissa 100.se-sidor saknar og:description men har ingressen i en
+        // div med klasserna "text-xl md:text-2xl" (verkar vara unik för ingressen).
+        $fallback = extract_text_xl_description($html);
+        if ($fallback !== '') {
+            $result['description'] = $fallback;
+        }
     }
 
     return $result;
+}
+
+// Plocka ut text ur <div class="... text-xl ... md:text-2xl ..."> när og:description saknas.
+// Använder DOMXPath eftersom klassordning kan variera och divar kan vara nästlade.
+function extract_text_xl_description(string $html): string {
+    if (!class_exists('DOMDocument')) return '';
+    $doc  = new DOMDocument();
+    $prev = libxml_use_internal_errors(true);
+    @$doc->loadHTML('<?xml encoding="UTF-8"?>' . $html);
+    libxml_clear_errors();
+    libxml_use_internal_errors($prev);
+    $xpath = new DOMXPath($doc);
+    $nodes = $xpath->query(
+        "//div[contains(concat(' ', normalize-space(@class), ' '), ' text-xl ')"
+        . " and contains(concat(' ', normalize-space(@class), ' '), ' md:text-2xl ')]"
+    );
+    if ($nodes && $nodes->length > 0) {
+        return trim(preg_replace('/\s+/', ' ', $nodes->item(0)->textContent));
+    }
+    return '';
 }
 
 $downloadTitle = null;
