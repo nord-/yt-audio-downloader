@@ -61,10 +61,18 @@ if ($action === 'check') {
         exit;
     }
 
-    // Jobb pågår — läs progress-fil och returnera fas + procent
+    // Jobb pågår — läs progress-fil och returnera fas + procent.
+    // Om worker.php kraschat ligger progress-filen kvar med gammal updated_at;
+    // då behandlar vi det som timeout istället för att returnera "stuck" progress.
     if (file_exists($progFile)) {
         $prog = @json_decode(@file_get_contents($progFile), true);
         if (is_array($prog) && isset($prog['phase'])) {
+            $age = time() - (int) ($prog['updated_at'] ?? 0);
+            if ($age > 600) {
+                @unlink($logFile); @unlink($progFile);
+                echo json_encode(['done' => false, 'error' => 'Nedladdningen tog för lång tid.']);
+                exit;
+            }
             echo json_encode([
                 'done'    => false,
                 'phase'   => $prog['phase'],
@@ -74,7 +82,7 @@ if ($action === 'check') {
         }
     }
 
-    // Progress-fil saknas — jobbet kan ha hängt (ingen aktivitet på 10 min)
+    // Progress-fil saknas eller är korrupt — fallback till log-mtime som livstecken
     if (file_exists($logFile) && (time() - filemtime($logFile)) > 600) {
         @unlink($logFile); @unlink($progFile);
         echo json_encode(['done' => false, 'error' => 'Nedladdningen tog för lång tid.']);
@@ -196,6 +204,20 @@ $bgCmd = 'nohup php ' . escapeshellarg(__DIR__ . '/worker.php')
     . ' ' . escapeshellarg($url)
     . ' > /dev/null 2>&1 &';
 
-exec($bgCmd);
+$bgOutput   = [];
+$bgExitCode = 0;
+exec($bgCmd, $bgOutput, $bgExitCode);
+
+if ($bgExitCode !== 0) {
+    // Om själva bakgrundsstarten failade (t.ex. php/nohup saknas) har vi ingen
+    // worker som kommer skriva .err — rapportera direkt och städa titel-filen.
+    @unlink(DOWNLOADS_DIR . '/.' . $jobId . '.title');
+    http_response_code(500);
+    echo json_encode([
+        'success' => false,
+        'error'   => 'Kunde inte starta bakgrundsjobb: ' . trim(implode("\n", $bgOutput)),
+    ]);
+    exit;
+}
 
 echo json_encode(['success' => true, 'job_id' => $jobId, 'pending' => true]);

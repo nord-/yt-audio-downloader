@@ -26,7 +26,6 @@ $errFile  = DOWNLOADS_DIR . '/.' . $jobId . '.err';
 $doneFile = DOWNLOADS_DIR . '/.' . $jobId . '.done';
 $progFile = DOWNLOADS_DIR . '/.' . $jobId . '.progress';
 
-$log = fopen($logFile, 'a');
 $lastPercent = 0;
 $lastWrite   = 0;
 
@@ -37,11 +36,26 @@ function write_progress(string $file, array $state): void {
     @rename($tmp, $file);
 }
 
+// Rensa alla temporära filer för ett jobb-ID (partial mp4, .part, osv).
+// Kallas vid fel så vi inte lämnar GB av skräp till nästa cleanup-runda.
+function cleanup_partials(string $downloadsDir, string $jobId): void {
+    foreach (glob("$downloadsDir/$jobId.*") as $f) {
+        if (is_file($f)) @unlink($f);
+    }
+}
+
 function error_exit(string $errFile, string $progFile, string $msg, $log = null): never {
     file_put_contents($errFile, $msg);
     @unlink($progFile);
     if ($log) fclose($log);
     exit(1);
+}
+
+$log = fopen($logFile, 'a');
+if ($log === false) {
+    // Oftast permissions på downloads/ — misslyckas tydligt istället för att fwrite
+    // tyst triggar warnings och loggen försvinner.
+    error_exit($errFile, $progFile, "Kunde inte öppna loggfil: $logFile");
 }
 
 // ── Steg 1: yt-dlp laddar ner video ──────────
@@ -95,9 +109,11 @@ while (($line = fgets($fp)) !== false) {
 
 $status = pclose($fp);
 if ($status !== 0) {
+    cleanup_partials(DOWNLOADS_DIR, $jobId);
     error_exit($errFile, $progFile, $lastError ?: 'Nedladdning misslyckades.', $log);
 }
 if (!file_exists($mp4File)) {
+    cleanup_partials(DOWNLOADS_DIR, $jobId);
     error_exit($errFile, $progFile, 'Ingen videofil producerades.', $log);
 }
 
@@ -122,7 +138,7 @@ $ffCmd = implode(' ', [
 
 $fp = popen($ffCmd, 'r');
 if (!$fp) {
-    @unlink($mp4File);
+    cleanup_partials(DOWNLOADS_DIR, $jobId);
     error_exit($errFile, $progFile, 'Kunde inte starta ffmpeg.', $log);
 }
 while (($line = fgets($fp)) !== false) {
@@ -132,7 +148,7 @@ while (($line = fgets($fp)) !== false) {
 $status = pclose($fp);
 
 if ($status !== 0 || !file_exists($m4aFile)) {
-    @unlink($mp4File);
+    cleanup_partials(DOWNLOADS_DIR, $jobId);
     error_exit($errFile, $progFile, 'Konvertering misslyckades.', $log);
 }
 

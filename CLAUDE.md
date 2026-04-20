@@ -44,7 +44,7 @@ Frontend växlar mellan **determinate bar** (procent under `phase=download`) och
 - **Atomisk JSON-write (tmp + rename)** – frontend kan aldrig läsa en halvskriven progress-fil.
 - **Dolda jobbfiler i `downloads/`** (`.log`, `.err`, `.done`, `.progress`, `.title`) i stället för en `jobs/`-mapp – en enda rensningsrutin, inga extra .htaccess-blockeringar behövs (dolda filer filtreras bort i listningen).
 - **Polling via `check` med `.done`-sentinel** – `.done` skapas *efter* ffmpeg, så klienten ser aldrig en halv fil.
-- **Hängnings-detektion**: om `.log` inte rörts på 10 min OCH progress-filen saknas rapporteras jobbet som misslyckat.
+- **Hängnings-detektion**: om progress-filens `updated_at` är äldre än 10 min rapporteras jobbet som misslyckat (worker har dött men progress-filen ligger kvar). Saknas progress-filen helt används `.log`-mtime som fallback-livstecken.
 - **100.se-scraping** pekar direkt på `360p/video.m3u8`-subströmmen, inte master-playlisten – undviker att yt-dlp laddar ner högsta kvaliteten i onödan.
 - **Filnamnsstrategi**: jobId används som temporärt filnamn under körning. Titeln saneras (`[^a-zA-Z0-9åäöÅÄÖ_-]` → `_`) och skrivs till `.<jobId>.title`; byte sker i `check` efter `.done`.
 - **Städning vid varje index-laddning**: dolda filer > 24h, icke-ljudfiler > 1h (fångar yt-dlp-krascher som lämnat kvar mp4). Ljudfiler rensas aldrig automatiskt.
