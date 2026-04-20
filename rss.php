@@ -20,13 +20,24 @@ if (is_dir(DOWNLOADS_DIR)) {
         if (!preg_match('/\.(mp3|m4a|ogg|opus|wav)$/i', $item)) continue;
         $path = DOWNLOADS_DIR . '/' . $item;
         if (!is_file($path)) continue;
-        $ext = strtolower(pathinfo($item, PATHINFO_EXTENSION));
+        $ext       = strtolower(pathinfo($item, PATHINFO_EXTENSION));
+        $fileBase  = pathinfo($item, PATHINFO_FILENAME);
+        $titlePath = DOWNLOADS_DIR . '/' . $fileBase . '.title';
+        $descPath  = DOWNLOADS_DIR . '/' . $fileBase . '.desc';
+        $imgPath   = DOWNLOADS_DIR . '/' . $fileBase . '.jpg';
+        // Rå titel från sidecar bevarar frågetecken, punkter och tecken som inte tål filsystem.
+        // Fallback: härled titel från filnamnet (underscore → space) för filer utan sidecar.
+        $title       = is_file($titlePath) ? trim(file_get_contents($titlePath)) : str_replace('_', ' ', $fileBase);
+        $description = is_file($descPath)  ? trim(file_get_contents($descPath))  : '';
+        $imageUrl    = is_file($imgPath)   ? $downloadsBase . '/' . rawurlencode($fileBase . '.jpg') : '';
         $files[] = [
             'name'     => $item,
-            'title'    => str_replace('_', ' ', pathinfo($item, PATHINFO_FILENAME)),
+            'title'    => $title,
             'size'     => filesize($path),
             'modified' => filemtime($path),
             'url'      => $downloadsBase . '/' . rawurlencode($item),
+            'desc'     => $description,
+            'image'    => $imageUrl,
             'mime'     => match($ext) {
                 'mp3'  => 'audio/mpeg',
                 'm4a'  => 'audio/mp4',
@@ -70,6 +81,13 @@ echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
       <title><?= x($f['title']) ?></title>
       <guid isPermaLink="false"><?= x($f['url']) ?></guid>
       <pubDate><?= rfc($f['modified']) ?></pubDate>
+<?php if ($f['desc'] !== ''): ?>
+      <description><?= x($f['desc']) ?></description>
+      <itunes:summary><?= x($f['desc']) ?></itunes:summary>
+<?php endif; ?>
+<?php if ($f['image'] !== ''): ?>
+      <itunes:image href="<?= x($f['image']) ?>"/>
+<?php endif; ?>
       <enclosure url="<?= x($f['url']) ?>"
                  length="<?= $f['size'] ?>"
                  type="<?= x($f['mime']) ?>"/>
