@@ -80,8 +80,18 @@ if (is_dir(DOWNLOADS_DIR)) {
         if (str_ends_with($item, '.part')) continue;             // ofärdiga nedladdningar
         $path = DOWNLOADS_DIR . '/' . $item;
         if (is_file($path)) {
+            $fileBase  = pathinfo($item, PATHINFO_FILENAME);
+            $titlePath = DOWNLOADS_DIR . '/' . $fileBase . '.title';
+            $descPath  = DOWNLOADS_DIR . '/' . $fileBase . '.desc';
+            $imgPath   = DOWNLOADS_DIR . '/' . $fileBase . '.jpg';
+            $title     = is_file($titlePath) ? trim(file_get_contents($titlePath)) : str_replace('_', ' ', $fileBase);
+            $desc      = is_file($descPath)  ? trim(file_get_contents($descPath))  : '';
+            $imageUrl  = is_file($imgPath)   ? DOWNLOADS_URL . '/' . rawurlencode($fileBase . '.jpg') : '';
             $files[] = [
                 'name'     => $item,
+                'title'    => $title,
+                'desc'     => $desc,
+                'image'    => $imageUrl,
                 'size'     => filesize($path),
                 'modified' => filemtime($path),
                 'url'      => DOWNLOADS_URL . '/' . rawurlencode($item),
@@ -275,7 +285,7 @@ function formatBytes(int $bytes): string {
 
         .file-item {
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             gap: 0.75rem;
             padding: 0.75rem 0;
             border-bottom: 1px solid #1e293b;
@@ -286,6 +296,20 @@ function formatBytes(int $bytes): string {
         .file-icon {
             font-size: 1.5rem;
             flex-shrink: 0;
+            width: 56px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .file-thumb {
+            width: 56px;
+            height: 56px;
+            border-radius: 6px;
+            object-fit: cover;
+            flex-shrink: 0;
+            background: #0f172a;
         }
 
         .file-info {
@@ -293,19 +317,32 @@ function formatBytes(int $bytes): string {
             min-width: 0;
         }
 
-        .file-name {
-            font-size: 0.9rem;
-            font-weight: 500;
-            color: #e2e8f0;
-            white-space: nowrap;
+        .file-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #f1f5f9;
             overflow: hidden;
             text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .file-desc {
+            font-size: 0.82rem;
+            color: #94a3b8;
+            margin-top: 0.2rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
         }
 
         .file-meta {
-            font-size: 0.78rem;
+            font-size: 0.75rem;
             color: #64748b;
-            margin-top: 0.15rem;
+            margin-top: 0.3rem;
         }
 
         .btn-download {
@@ -373,11 +410,20 @@ function formatBytes(int $bytes): string {
             <ul class="file-list" id="fileList">
                 <?php foreach ($files as $f): ?>
                 <li class="file-item" id="file-<?= md5($f['name']) ?>">
-                    <div class="file-icon">🎵</div>
+                    <?php if ($f['image'] !== ''): ?>
+                        <img class="file-thumb" src="<?= htmlspecialchars($f['image']) ?>" alt="" loading="lazy">
+                    <?php else: ?>
+                        <div class="file-icon">🎵</div>
+                    <?php endif; ?>
                     <div class="file-info">
-                        <div class="file-name" title="<?= htmlspecialchars($f['name']) ?>">
-                            <?= htmlspecialchars($f['name']) ?>
+                        <div class="file-title" title="<?= htmlspecialchars($f['title']) ?>">
+                            <?= htmlspecialchars($f['title']) ?>
                         </div>
+                        <?php if ($f['desc'] !== ''): ?>
+                            <div class="file-desc" title="<?= htmlspecialchars($f['desc']) ?>">
+                                <?= htmlspecialchars($f['desc']) ?>
+                            </div>
+                        <?php endif; ?>
                         <div class="file-meta">
                             <?= formatBytes($f['size']) ?> &middot;
                             <?= date('Y-m-d H:i', $f['modified']) ?>
