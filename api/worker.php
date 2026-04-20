@@ -30,15 +30,34 @@ if (!file_exists($job_file)) {
 $job = json_decode(file_get_contents($job_file), true);
 $url = $job['url'];
 
+// Atomic write: temp-file then rename(). rename() is atomic on POSIX,
+// so concurrent readers in status.php never see a half-written file.
 function update_job(string $job_file, array $data): void {
-    file_put_contents($job_file, json_encode($data));
+    $tmp = $job_file . '.tmp';
+    file_put_contents($tmp, json_encode($data));
+    rename($tmp, $job_file);
+}
+
+$phase      = 'download';
+$progress   = 0;
+$last_write = 0;
+$last_lines = [];
+
+function error_exit(string $job_file, array $job, string $message, string $phase, int $progress): void {
+    update_job($job_file, array_merge($job, [
+        'status'   => 'error',
+        'message'  => $message,
+        'phase'    => 'error',
+        'progress' => $progress,
+    ]));
+    exit(1);
 }
 
 update_job($job_file, array_merge($job, [
     'status'   => 'running',
     'message'  => 'Startar nedladdning...',
-    'phase'    => 'download',
-    'progress' => 0,
+    'phase'    => $phase,
+    'progress' => $progress,
 ]));
 
 $temp_prefix = AUDIO_DIR . $job_id . '_';
@@ -56,17 +75,8 @@ $cmd = sprintf(
 
 $handle = popen($cmd, 'r');
 if (!$handle) {
-    update_job($job_file, array_merge($job, [
-        'status'  => 'error',
-        'message' => 'Kunde inte starta yt-dlp.',
-    ]));
-    exit(1);
+    error_exit($job_file, $job, 'Kunde inte starta yt-dlp.', $phase, $progress);
 }
-
-$last_write = 0;
-$phase      = 'download';
-$progress   = 0;
-$last_lines = [];
 
 while (!feof($handle)) {
     $line = fgets($handle);
@@ -102,20 +112,12 @@ $exit_code = pclose($handle);
 
 if ($exit_code !== 0) {
     $error_msg = implode(' | ', array_slice($last_lines, -3));
-    update_job($job_file, array_merge($job, [
-        'status'  => 'error',
-        'message' => $error_msg ?: 'yt-dlp misslyckades.',
-    ]));
-    exit(1);
+    error_exit($job_file, $job, $error_msg ?: 'yt-dlp misslyckades.', $phase, $progress);
 }
 
 $files = glob($temp_prefix . '*.mp3');
 if (empty($files)) {
-    update_job($job_file, array_merge($job, [
-        'status'  => 'error',
-        'message' => 'MP3-filen hittades inte efter konvertering.',
-    ]));
-    exit(1);
+    error_exit($job_file, $job, 'MP3-filen hittades inte efter konvertering.', $phase, $progress);
 }
 
 $filepath = $files[0];
