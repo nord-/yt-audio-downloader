@@ -1,0 +1,6 @@
+# Nedladdade filer och jobb-state (skapas runtime av appen)
+downloads/
+
+# OS-filer
+.DS_Store
+Thumbs.db
