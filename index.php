@@ -22,7 +22,7 @@ foreach (glob(DOWNLOADS_DIR . '/.*.done') as $doneFile) {
     $m4aFile   = DOWNLOADS_DIR . '/' . $jid . '.m4a';
     $titleFile = DOWNLOADS_DIR . '/.' . $jid . '.title';
     $descFile  = DOWNLOADS_DIR . '/.' . $jid . '.desc';
-    $imgFile   = DOWNLOADS_DIR . '/.' . $jid . '.jpg';
+    $imgFile   = DOWNLOADS_DIR . '/.' . $jid . '.imageurl';
     $finalBase = $jid;
 
     if (is_file($m4aFile) && is_file($titleFile)) {
@@ -46,7 +46,7 @@ foreach (glob(DOWNLOADS_DIR . '/.*.done') as $doneFile) {
     if (is_file($descFile) && !file_exists($destDesc)) {
         @rename($descFile, $destDesc);
     }
-    $destImg = DOWNLOADS_DIR . '/' . $finalBase . '.jpg';
+    $destImg = DOWNLOADS_DIR . '/' . $finalBase . '.imageurl';
     if (is_file($imgFile) && !file_exists($destImg)) {
         @rename($imgFile, $destImg);
     }
@@ -64,7 +64,7 @@ foreach (glob(DOWNLOADS_DIR . '/.*') as $hidden) {
 // Städa bort temp-videofiler som yt-dlp kan ha lämnat kvar vid krasch (äldre än 1h)
 foreach (glob(DOWNLOADS_DIR . '/*') as $f) {
     if (!is_file($f)) continue;
-    if (preg_match('/\.(mp3|m4a|ogg|opus|wav|title|desc|jpg|jpeg|png|webp)$/i', $f)) continue;  // behåll färdiga ljudfiler + sidecars
+    if (preg_match('/\.(mp3|m4a|ogg|opus|wav|title|desc|imageurl)$/i', $f)) continue;  // behåll färdiga ljudfiler + sidecars
     if ((time() - filemtime($f)) > 3600) {
         @unlink($f);
     }
@@ -83,10 +83,10 @@ if (is_dir(DOWNLOADS_DIR)) {
             $fileBase  = pathinfo($item, PATHINFO_FILENAME);
             $titlePath = DOWNLOADS_DIR . '/' . $fileBase . '.title';
             $descPath  = DOWNLOADS_DIR . '/' . $fileBase . '.desc';
-            $imgPath   = DOWNLOADS_DIR . '/' . $fileBase . '.jpg';
+            $imgPath   = DOWNLOADS_DIR . '/' . $fileBase . '.imageurl';
             $title     = is_file($titlePath) ? trim(file_get_contents($titlePath)) : str_replace('_', ' ', $fileBase);
             $desc      = is_file($descPath)  ? trim(file_get_contents($descPath))  : '';
-            $imageUrl  = is_file($imgPath)   ? DOWNLOADS_URL . '/' . rawurlencode($fileBase . '.jpg') : '';
+            $imageUrl  = is_file($imgPath)   ? trim(file_get_contents($imgPath))   : '';
             $files[] = [
                 'name'     => $item,
                 'title'    => $title,

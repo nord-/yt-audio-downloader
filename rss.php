@@ -4,8 +4,13 @@
 // ──────────────────────────────────────────────
 define('DOWNLOADS_DIR', __DIR__ . '/downloads');
 
-// Bygg bas-URL automatiskt utifrån serverns headers
-$scheme      = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+// Bygg bas-URL automatiskt utifrån serverns headers. Respektera X-Forwarded-Proto
+// (Synologys reverse proxy terminerar TLS och pratar HTTP internt) så att enclosure-
+// URL:er blir HTTPS i feeden — Apple Podcasts kräver HTTPS för bilder och media.
+$forwardedProto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '';
+$scheme      = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+               || strtolower($forwardedProto) === 'https'
+               ? 'https' : 'http';
 $host        = $_SERVER['HTTP_HOST'] ?? 'localhost';
 $scriptDir   = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
 $base        = $scheme . '://' . $host . $scriptDir;   // t.ex. https://synstation.nord.cc/100
@@ -24,12 +29,12 @@ if (is_dir(DOWNLOADS_DIR)) {
         $fileBase  = pathinfo($item, PATHINFO_FILENAME);
         $titlePath = DOWNLOADS_DIR . '/' . $fileBase . '.title';
         $descPath  = DOWNLOADS_DIR . '/' . $fileBase . '.desc';
-        $imgPath   = DOWNLOADS_DIR . '/' . $fileBase . '.jpg';
+        $imgPath   = DOWNLOADS_DIR . '/' . $fileBase . '.imageurl';
         // Rå titel från sidecar bevarar frågetecken, punkter och tecken som inte tål filsystem.
         // Fallback: härled titel från filnamnet (underscore → space) för filer utan sidecar.
         $title       = is_file($titlePath) ? trim(file_get_contents($titlePath)) : str_replace('_', ' ', $fileBase);
         $description = is_file($descPath)  ? trim(file_get_contents($descPath))  : '';
-        $imageUrl    = is_file($imgPath)   ? $downloadsBase . '/' . rawurlencode($fileBase . '.jpg') : '';
+        $imageUrl    = is_file($imgPath)   ? trim(file_get_contents($imgPath))   : '';
         $files[] = [
             'name'     => $item,
             'title'    => $title,

@@ -35,6 +35,8 @@ Frontend växlar mellan **determinate bar** (procent under `phase=download`) och
 - `.<jobId>.err` – felmeddelande (bara om fel uppstår)
 - `.<jobId>.done` – tom sentinel, sätts sist av worker
 - `.<jobId>.title` – skrivs av download.php (om 100.se-scrape lyckades), används vid rename
+- `.<jobId>.desc` – ingress från og:description, flyttas till `<titel>.desc` vid klart jobb
+- `.<jobId>.imageurl` – URL till original-episodbilden (på BunnyCDN), flyttas till `<titel>.imageurl`. Klienten (webbläsare, poddspelare) hämtar bilden direkt — inga bildfiler lagras på servern.
 
 ## Viktiga beslut
 
