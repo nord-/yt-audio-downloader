@@ -67,6 +67,7 @@ echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
 <rss version="2.0"
      xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
      xmlns:atom="http://www.w3.org/2005/Atom">
+<?php $coverUrl = 'https://www.100.se/logo.svg'; ?>
   <channel>
     <title>Mina nedladdningar</title>
     <link><?= x($base) ?></link>
@@ -74,6 +75,12 @@ echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
     <language>sv</language>
     <lastBuildDate><?= rfc($lastBuild) ?></lastBuildDate>
     <atom:link href="<?= x($feedUrl) ?>" rel="self" type="application/rss+xml"/>
+    <itunes:image href="<?= x($coverUrl) ?>"/>
+    <image>
+      <url><?= x($coverUrl) ?></url>
+      <title>Mina nedladdningar</title>
+      <link><?= x($base) ?></link>
+    </image>
     <itunes:explicit>no</itunes:explicit>
 
 <?php foreach ($files as $f): ?>
