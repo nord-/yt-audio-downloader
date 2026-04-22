@@ -24,12 +24,15 @@ if (is_dir(DOWNLOADS_DIR)) {
         $fileBase  = pathinfo($item, PATHINFO_FILENAME);
         $titlePath = DOWNLOADS_DIR . '/' . $fileBase . '.title';
         $descPath  = DOWNLOADS_DIR . '/' . $fileBase . '.desc';
-        $imgPath   = DOWNLOADS_DIR . '/' . $fileBase . '.imageurl';
+        $imgUrlPath = DOWNLOADS_DIR . '/' . $fileBase . '.imageurl';
+        $jpgPath    = DOWNLOADS_DIR . '/' . $fileBase . '.jpg';
         // Rå titel från sidecar bevarar frågetecken, punkter och tecken som inte tål filsystem.
         // Fallback: härled titel från filnamnet (underscore → space) för filer utan sidecar.
         $title       = is_file($titlePath) ? trim(file_get_contents($titlePath)) : str_replace('_', ' ', $fileBase);
         $description = is_file($descPath)  ? trim(file_get_contents($descPath))  : '';
-        $imageUrl    = is_file($imgPath)   ? trim(file_get_contents($imgPath))   : '';
+        // .imageurl (ny modell) först, .jpg (gammal, lokal thumbnail) som fallback.
+        $imageUrl    = is_file($imgUrlPath) ? trim(file_get_contents($imgUrlPath))
+                     : (is_file($jpgPath)  ? $downloadsBase . '/' . rawurlencode($fileBase . '.jpg') : '');
         $files[] = [
             'name'     => $item,
             'title'    => $title,

@@ -64,7 +64,7 @@ foreach (glob(DOWNLOADS_DIR . '/.*') as $hidden) {
 // Städa bort temp-videofiler som yt-dlp kan ha lämnat kvar vid krasch (äldre än 1h)
 foreach (glob(DOWNLOADS_DIR . '/*') as $f) {
     if (!is_file($f)) continue;
-    if (preg_match('/\.(mp3|m4a|ogg|opus|wav|title|desc|imageurl)$/i', $f)) continue;  // behåll färdiga ljudfiler + sidecars
+    if (preg_match('/\.(mp3|m4a|ogg|opus|wav|title|desc|imageurl|jpg)$/i', $f)) continue;  // behåll färdiga ljudfiler + sidecars (.jpg = gamla thumbnails, används som fallback)
     if ((time() - filemtime($f)) > 3600) {
         @unlink($f);
     }
@@ -83,10 +83,13 @@ if (is_dir(DOWNLOADS_DIR)) {
             $fileBase  = pathinfo($item, PATHINFO_FILENAME);
             $titlePath = DOWNLOADS_DIR . '/' . $fileBase . '.title';
             $descPath  = DOWNLOADS_DIR . '/' . $fileBase . '.desc';
-            $imgPath   = DOWNLOADS_DIR . '/' . $fileBase . '.imageurl';
+            $imgUrlPath = DOWNLOADS_DIR . '/' . $fileBase . '.imageurl';
+            $jpgPath    = DOWNLOADS_DIR . '/' . $fileBase . '.jpg';
             $title     = is_file($titlePath) ? trim(file_get_contents($titlePath)) : str_replace('_', ' ', $fileBase);
             $desc      = is_file($descPath)  ? trim(file_get_contents($descPath))  : '';
-            $imageUrl  = is_file($imgPath)   ? trim(file_get_contents($imgPath))   : '';
+            // .imageurl (ny modell) först, .jpg (gammal, lokal thumbnail) som fallback.
+            $imageUrl  = is_file($imgUrlPath) ? trim(file_get_contents($imgUrlPath))
+                       : (is_file($jpgPath)  ? DOWNLOADS_URL . '/' . rawurlencode($fileBase . '.jpg') : '');
             $files[] = [
                 'name'     => $item,
                 'title'    => $title,

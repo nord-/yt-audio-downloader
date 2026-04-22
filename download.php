@@ -126,11 +126,13 @@ if ($action === 'delete') {
     $path = DOWNLOADS_DIR . '/' . $filename;
     if (realpath($path) !== false && strpos(realpath($path), realpath(DOWNLOADS_DIR)) === 0) {
         if (unlink($path)) {
-            // Rensa sidecars (.title, .desc, .jpg) med samma basnamn — annars ligger de kvar som skräp.
+            // Rensa sidecars med samma basnamn — annars ligger de kvar som skräp.
+            // .jpg kan finnas från tidigare modell där bilder lagrades lokalt.
             $base = pathinfo($filename, PATHINFO_FILENAME);
             @unlink(DOWNLOADS_DIR . '/' . $base . '.title');
             @unlink(DOWNLOADS_DIR . '/' . $base . '.desc');
             @unlink(DOWNLOADS_DIR . '/' . $base . '.imageurl');
+            @unlink(DOWNLOADS_DIR . '/' . $base . '.jpg');
             echo json_encode(['success' => true, 'id' => md5($filename)]);
         } else {
             echo json_encode(['success' => false, 'error' => 'Kunde inte ta bort filen.']);
