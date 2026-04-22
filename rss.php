@@ -4,13 +4,8 @@
 // ──────────────────────────────────────────────
 define('DOWNLOADS_DIR', __DIR__ . '/downloads');
 
-// Bygg bas-URL automatiskt utifrån serverns headers. Respektera X-Forwarded-Proto
-// (Synologys reverse proxy terminerar TLS och pratar HTTP internt) så att enclosure-
-// URL:er blir HTTPS i feeden — Apple Podcasts kräver HTTPS för bilder och media.
-$forwardedProto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '';
-$scheme      = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-               || strtolower($forwardedProto) === 'https'
-               ? 'https' : 'http';
+// Bygg bas-URL automatiskt utifrån serverns headers
+$scheme      = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host        = $_SERVER['HTTP_HOST'] ?? 'localhost';
 $scriptDir   = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
 $base        = $scheme . '://' . $host . $scriptDir;   // t.ex. https://synstation.nord.cc/100
@@ -92,6 +87,11 @@ echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
 <?php endif; ?>
 <?php if ($f['image'] !== ''): ?>
       <itunes:image href="<?= x($f['image']) ?>"/>
+      <image>
+        <url><?= x($f['image']) ?></url>
+        <title><?= x($f['title']) ?></title>
+        <link><?= x($f['url']) ?></link>
+      </image>
 <?php endif; ?>
       <enclosure url="<?= x($f['url']) ?>"
                  length="<?= $f['size'] ?>"
