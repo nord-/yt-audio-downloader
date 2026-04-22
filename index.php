@@ -287,9 +287,13 @@ function formatBytes(int $bytes): string {
         }
 
         .file-item {
-            display: flex;
-            align-items: flex-start;
-            gap: 0.75rem;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto auto;
+            grid-template-areas:
+                "thumb title dl del"
+                "thumb desc  desc desc"
+                "thumb meta  meta meta";
+            column-gap: 0.75rem;
             padding: 0.75rem 0;
             border-bottom: 1px solid #1e293b;
         }
@@ -297,8 +301,9 @@ function formatBytes(int $bytes): string {
         .file-item:last-child { border-bottom: none; }
 
         .file-icon {
+            grid-area: thumb;
+            align-self: start;
             font-size: 1.5rem;
-            flex-shrink: 0;
             width: 56px;
             height: 56px;
             display: flex;
@@ -307,20 +312,18 @@ function formatBytes(int $bytes): string {
         }
 
         .file-thumb {
+            grid-area: thumb;
+            align-self: start;
             width: 56px;
             height: 56px;
             border-radius: 6px;
             object-fit: cover;
-            flex-shrink: 0;
             background: #0f172a;
         }
 
-        .file-info {
-            flex: 1;
-            min-width: 0;
-        }
-
         .file-title {
+            grid-area: title;
+            align-self: center;
             font-size: 0.95rem;
             font-weight: 600;
             color: #f1f5f9;
@@ -332,6 +335,7 @@ function formatBytes(int $bytes): string {
         }
 
         .file-desc {
+            grid-area: desc;
             font-size: 0.82rem;
             color: #94a3b8;
             margin-top: 0.2rem;
@@ -343,12 +347,15 @@ function formatBytes(int $bytes): string {
         }
 
         .file-meta {
+            grid-area: meta;
             font-size: 0.75rem;
             color: #64748b;
             margin-top: 0.3rem;
         }
 
         .btn-download {
+            grid-area: dl;
+            align-self: center;
             background: #0f4c2a;
             border: 1px solid #16a34a;
             border-radius: 6px;
@@ -357,13 +364,14 @@ function formatBytes(int $bytes): string {
             font-weight: 500;
             padding: 0.35rem 0.75rem;
             text-decoration: none;
-            flex-shrink: 0;
             transition: background 0.2s;
         }
 
         .btn-download:hover { background: #166534; }
 
         .btn-delete {
+            grid-area: del;
+            align-self: center;
             background: none;
             border: 1px solid #475569;
             border-radius: 6px;
@@ -371,7 +379,6 @@ function formatBytes(int $bytes): string {
             font-size: 0.8rem;
             padding: 0.35rem 0.6rem;
             cursor: pointer;
-            flex-shrink: 0;
             transition: all 0.2s;
         }
 
@@ -387,7 +394,36 @@ function formatBytes(int $bytes): string {
             padding: 2rem 0;
             font-size: 0.9rem;
         }
-    </style>
+
+        /* På telefon: kollapsa download-knappen till bara ikon, låt desc/meta spänna full bredd */
+        @media (max-width: 560px) {
+            body { padding: 1.25rem 0.75rem; }
+
+            .card { padding: 1rem; }
+
+            .file-item {
+                grid-template-areas:
+                    "thumb title dl del"
+                    "desc  desc  desc desc"
+                    "meta  meta  meta meta";
+                column-gap: 0.5rem;
+            }
+
+            .btn-download .btn-label { display: none; }
+
+            .btn-download,
+            .btn-delete {
+                width: 2.25rem;
+                height: 2.25rem;
+                padding: 0;
+                font-size: 1rem;
+                line-height: 1;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+        }
+</style>
 </head>
 <body>
 <div class="container">
@@ -418,26 +454,24 @@ function formatBytes(int $bytes): string {
                     <?php else: ?>
                         <div class="file-icon">🎵</div>
                     <?php endif; ?>
-                    <div class="file-info">
-                        <div class="file-title" title="<?= htmlspecialchars($f['title']) ?>">
-                            <?= htmlspecialchars($f['title']) ?>
-                        </div>
-                        <?php if ($f['desc'] !== ''): ?>
-                            <div class="file-desc" title="<?= htmlspecialchars($f['desc']) ?>">
-                                <?= htmlspecialchars($f['desc']) ?>
-                            </div>
-                        <?php endif; ?>
-                        <div class="file-meta">
-                            <?= formatBytes($f['size']) ?> &middot;
-                            <?= date('Y-m-d H:i', $f['modified']) ?>
-                        </div>
+                    <div class="file-title" title="<?= htmlspecialchars($f['title']) ?>">
+                        <?= htmlspecialchars($f['title']) ?>
                     </div>
-                    <a class="btn-download" href="<?= htmlspecialchars($f['url']) ?>" download>
-                        &#8595; Ladda ner
+                    <a class="btn-download" href="<?= htmlspecialchars($f['url']) ?>" download aria-label="Ladda ner">
+                        <span class="btn-icon">&#8595;</span><span class="btn-label"> Ladda ner</span>
                     </a>
-                    <button class="btn-delete" onclick="deleteFile('<?= htmlspecialchars(addslashes($f['name'])) ?>')">
+                    <button class="btn-delete" onclick="deleteFile('<?= htmlspecialchars(addslashes($f['name'])) ?>')" aria-label="Ta bort">
                         &#128465;
                     </button>
+                    <?php if ($f['desc'] !== ''): ?>
+                        <div class="file-desc" title="<?= htmlspecialchars($f['desc']) ?>">
+                            <?= htmlspecialchars($f['desc']) ?>
+                        </div>
+                    <?php endif; ?>
+                    <div class="file-meta">
+                        <?= formatBytes($f['size']) ?> &middot;
+                        <?= date('Y-m-d H:i', $f['modified']) ?>
+                    </div>
                 </li>
                 <?php endforeach; ?>
             </ul>
