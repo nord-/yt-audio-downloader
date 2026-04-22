@@ -29,7 +29,7 @@ if ($action === 'check') {
     $m4aFile   = DOWNLOADS_DIR . '/' . $jobId . '.m4a';
     $titleFile = DOWNLOADS_DIR . '/.' . $jobId . '.title';
     $descFile  = DOWNLOADS_DIR . '/.' . $jobId . '.desc';
-    $imgFile   = DOWNLOADS_DIR . '/.' . $jobId . '.jpg';
+    $imgFile   = DOWNLOADS_DIR . '/.' . $jobId . '.imageurl';
     $logFile   = DOWNLOADS_DIR . '/.' . $jobId . '.log';
     $errFile   = DOWNLOADS_DIR . '/.' . $jobId . '.err';
     $doneFile  = DOWNLOADS_DIR . '/.' . $jobId . '.done';   // sätts EFTER ffmpeg är klar
@@ -69,12 +69,12 @@ if ($action === 'check') {
             }
         }
 
-        // Flytta ingress + episodbild till synliga sidecars med samma basnamn som ljudfilen.
+        // Flytta ingress + episodbild-URL till synliga sidecars med samma basnamn som ljudfilen.
         $destDesc = DOWNLOADS_DIR . '/' . $finalBase . '.desc';
         if (file_exists($descFile) && !file_exists($destDesc)) {
             @rename($descFile, $destDesc);
         }
-        $destImg = DOWNLOADS_DIR . '/' . $finalBase . '.jpg';
+        $destImg = DOWNLOADS_DIR . '/' . $finalBase . '.imageurl';
         if (file_exists($imgFile) && !file_exists($destImg)) {
             @rename($imgFile, $destImg);
         }
@@ -126,10 +126,12 @@ if ($action === 'delete') {
     $path = DOWNLOADS_DIR . '/' . $filename;
     if (realpath($path) !== false && strpos(realpath($path), realpath(DOWNLOADS_DIR)) === 0) {
         if (unlink($path)) {
-            // Rensa sidecars (.title, .desc, .jpg) med samma basnamn — annars ligger de kvar som skräp.
+            // Rensa sidecars med samma basnamn — annars ligger de kvar som skräp.
+            // .jpg kan finnas från tidigare modell där bilder lagrades lokalt.
             $base = pathinfo($filename, PATHINFO_FILENAME);
             @unlink(DOWNLOADS_DIR . '/' . $base . '.title');
             @unlink(DOWNLOADS_DIR . '/' . $base . '.desc');
+            @unlink(DOWNLOADS_DIR . '/' . $base . '.imageurl');
             @unlink(DOWNLOADS_DIR . '/' . $base . '.jpg');
             echo json_encode(['success' => true, 'id' => md5($filename)]);
         } else {
@@ -265,34 +267,14 @@ if ($downloadDesc !== null) {
     file_put_contents(DOWNLOADS_DIR . '/.' . $jobId . '.desc', $downloadDesc);
 }
 
-// Hämta episodbild lokalt — bilden följer då med även om källan försvinner.
-// Misslyckas tyst: bilden är trevlig-att-ha, inte kritisk för jobbet.
-// Låser host till BunnyCDN-mönstret som 100.se faktiskt använder — förhindrar SSRF
-// eftersom og:image kommer från en sida som en angripare potentiellt kontrollerar
-// (str_contains($url,'100.se') är en svag filter).
-if ($downloadImage !== null && function_exists('curl_init')
+// Spara URL:en till episodbilden i stället för att ladda ner den.
+// Klienten (webbläsare, poddspelare) hämtar direkt från BunnyCDN — inga bilder
+// lagras på servern, inga mixed-content-problem eftersom BunnyCDN alltid är HTTPS.
+// Låser till BunnyCDN-mönstret som 100.se faktiskt använder — trasiga/främmande
+// URL:er tas bort så att RSS-feeden inte råkar peka på nåt konstigt.
+if ($downloadImage !== null
     && preg_match('~^https://vz-[a-f0-9-]+\.b-cdn\.net/~', $downloadImage)) {
-    $imgPath = DOWNLOADS_DIR . '/.' . $jobId . '.jpg';
-    $fp      = fopen($imgPath, 'wb');
-    if ($fp) {
-        $ch = curl_init($downloadImage);
-        curl_setopt_array($ch, [
-            CURLOPT_FILE           => $fp,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS      => 3,
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_SSL_VERIFYHOST => 2,
-            CURLOPT_TIMEOUT        => 10,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0',
-        ]);
-        $ok   = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        fclose($fp);
-        if (!$ok || $code >= 400 || filesize($imgPath) < 100) {
-            @unlink($imgPath);
-        }
-    }
+    file_put_contents(DOWNLOADS_DIR . '/.' . $jobId . '.imageurl', $downloadImage);
 }
 
 // Starta worker.php i bakgrunden. Den sköter yt-dlp + ffmpeg och skriver

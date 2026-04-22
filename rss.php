@@ -24,12 +24,15 @@ if (is_dir(DOWNLOADS_DIR)) {
         $fileBase  = pathinfo($item, PATHINFO_FILENAME);
         $titlePath = DOWNLOADS_DIR . '/' . $fileBase . '.title';
         $descPath  = DOWNLOADS_DIR . '/' . $fileBase . '.desc';
-        $imgPath   = DOWNLOADS_DIR . '/' . $fileBase . '.jpg';
+        $imgUrlPath = DOWNLOADS_DIR . '/' . $fileBase . '.imageurl';
+        $jpgPath    = DOWNLOADS_DIR . '/' . $fileBase . '.jpg';
         // Rå titel från sidecar bevarar frågetecken, punkter och tecken som inte tål filsystem.
         // Fallback: härled titel från filnamnet (underscore → space) för filer utan sidecar.
         $title       = is_file($titlePath) ? trim(file_get_contents($titlePath)) : str_replace('_', ' ', $fileBase);
         $description = is_file($descPath)  ? trim(file_get_contents($descPath))  : '';
-        $imageUrl    = is_file($imgPath)   ? $downloadsBase . '/' . rawurlencode($fileBase . '.jpg') : '';
+        // .imageurl (ny modell) först, .jpg (gammal, lokal thumbnail) som fallback.
+        $imageUrl    = is_file($imgUrlPath) ? trim(file_get_contents($imgUrlPath))
+                     : (is_file($jpgPath)  ? $downloadsBase . '/' . rawurlencode($fileBase . '.jpg') : '');
         $files[] = [
             'name'     => $item,
             'title'    => $title,
@@ -67,6 +70,7 @@ echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
 <rss version="2.0"
      xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
      xmlns:atom="http://www.w3.org/2005/Atom">
+<?php $coverUrl = 'https://raw.githubusercontent.com/nord-/yt-audio-downloader/master/cover.png'; ?>
   <channel>
     <title>Mina nedladdningar</title>
     <link><?= x($base) ?></link>
@@ -74,6 +78,12 @@ echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
     <language>sv</language>
     <lastBuildDate><?= rfc($lastBuild) ?></lastBuildDate>
     <atom:link href="<?= x($feedUrl) ?>" rel="self" type="application/rss+xml"/>
+    <itunes:image href="<?= x($coverUrl) ?>"/>
+    <image>
+      <url><?= x($coverUrl) ?></url>
+      <title>Mina nedladdningar</title>
+      <link><?= x($base) ?></link>
+    </image>
     <itunes:explicit>no</itunes:explicit>
 
 <?php foreach ($files as $f): ?>
@@ -87,6 +97,11 @@ echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
 <?php endif; ?>
 <?php if ($f['image'] !== ''): ?>
       <itunes:image href="<?= x($f['image']) ?>"/>
+      <image>
+        <url><?= x($f['image']) ?></url>
+        <title><?= x($f['title']) ?></title>
+        <link><?= x($f['url']) ?></link>
+      </image>
 <?php endif; ?>
       <enclosure url="<?= x($f['url']) ?>"
                  length="<?= $f['size'] ?>"
