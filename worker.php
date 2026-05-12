@@ -66,6 +66,7 @@ write_progress($progFile, ['phase' => 'download', 'percent' => 0, 'updated_at' =
 $dlCmd = implode(' ', [
     escapeshellarg(YTDLP_PATH),
     '--downloader', 'native',
+    '-N', '4',
     '--newline',
     '--no-playlist',
     '--restrict-filenames',
