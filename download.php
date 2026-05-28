@@ -171,7 +171,13 @@ function extract_100se(string $pageUrl): array {
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => false,
             CURLOPT_TIMEOUT        => 15,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            CURLOPT_ENCODING       => '',   // Hantera gzip/br automatiskt
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            CURLOPT_HTTPHEADER     => [
+                'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language: sv-SE,sv;q=0.9,en;q=0.8',
+                'Cache-Control: no-cache',
+            ],
         ]);
         $html = curl_exec($ch);
         curl_close($ch);
@@ -179,7 +185,10 @@ function extract_100se(string $pageUrl): array {
 
     if (!$html) {
         $ctx  = stream_context_create([
-            'http' => ['header' => "User-Agent: Mozilla/5.0\r\n", 'timeout' => 15],
+            'http' => [
+                'header'  => "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nAccept-Language: sv-SE,sv;q=0.9\r\n",
+                'timeout' => 15,
+            ],
             'ssl'  => ['verify_peer' => false, 'verify_peer_name' => false],
         ]);
         $html = @file_get_contents($pageUrl, false, $ctx);
@@ -189,26 +198,42 @@ function extract_100se(string $pageUrl): array {
 
     $result = [];
 
+    // Primär: extrahera video-GUID från spelarens iframe-src (mer tillförlitligt än og:image).
+    // Format: https://iframe.mediadelivery.net/embed/<libraryId>/<guid>
+    if (preg_match('~https://iframe\.mediadelivery\.net/embed/(\d+)/([a-f0-9-]{36})~', $html, $mm)) {
+        $libId     = $mm[1];
+        $videoGuid = $mm[2];
+        // Hämta BunnyCDN-hostname från og:image om möjligt (konstruera HLS-URL).
+        // Faller annars tillbaka till iframe-URL:en direkt (stöds av moderna yt-dlp).
+        if (preg_match('~content="(https://vz-[a-f0-9-]+\.b-cdn\.net)/' . preg_quote($videoGuid, '~') . '/~', $html, $cdn)) {
+            $result['url'] = "{$cdn[1]}/{$videoGuid}/360p/video.m3u8";
+        } else {
+            $result['url'] = "https://iframe.mediadelivery.net/embed/{$libId}/{$videoGuid}";
+        }
+    }
+
+    // Episodbild — alltid från og:image oberoende av video-URL-metod
     if (preg_match('~<meta[^>]+property="og:image"[^>]+content="([^"]+)"~', $html, $m)
      || preg_match('~<meta[^>]+content="([^"]+)"[^>]+property="og:image"~', $html, $m)) {
         $result['image_url'] = $m[1];
-        // Peka direkt på 360p-subströmmen (inte master-playlisten).
-        // Undviker att yt-dlp väljer fel kvalitet eller laddar ner allt.
-        if (preg_match('~^https://(vz-[a-f0-9-]+\.b-cdn\.net)/([a-f0-9-]{36})/~', $m[1], $mm)) {
+        // Fallback till gammal metod om iframe-extraktion ovan misslyckades
+        if (!isset($result['url'])
+            && preg_match('~^https://(vz-[a-f0-9-]+\.b-cdn\.net)/([a-f0-9-]{36})/~', $m[1], $mm)) {
             $result['url'] = "https://{$mm[1]}/{$mm[2]}/360p/video.m3u8";
         }
     }
 
-    if (preg_match('~<meta[^>]+property="og:title"[^>]+content="([^"]+)"~', $html, $m)) {
-        $result['title'] = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
-    } elseif (preg_match('~<meta[^>]+content="([^"]+)"[^>]+property="og:title"~', $html, $m)) {
-        $result['title'] = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    // Titel — rensa bort webbplatsens suffix " - 100.se"
+    if (preg_match('~<meta[^>]+property="og:title"[^>]+content="([^"]+)"~', $html, $m)
+     || preg_match('~<meta[^>]+content="([^"]+)"[^>]+property="og:title"~', $html, $m)) {
+        $title = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $title = preg_replace('~\s*\|\s*.+$|\s*-\s*100\.se\s*$~i', '', $title);
+        $result['title'] = trim($title);
     }
 
     // 100.se lägger ingressen i og:description — används som RSS <description>.
-    if (preg_match('~<meta[^>]+property="og:description"[^>]+content="([^"]+)"~', $html, $m)) {
-        $result['description'] = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
-    } elseif (preg_match('~<meta[^>]+content="([^"]+)"[^>]+property="og:description"~', $html, $m)) {
+    if (preg_match('~<meta[^>]+property="og:description"[^>]+content="([^"]+)"~', $html, $m)
+     || preg_match('~<meta[^>]+content="([^"]+)"[^>]+property="og:description"~', $html, $m)) {
         $result['description'] = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
     } else {
         // Fallback: vissa 100.se-sidor saknar og:description men har ingressen i en
