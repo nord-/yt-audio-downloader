@@ -16,6 +16,18 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+// Om POST-bodyn överskrider post_max_size kastar PHP hela bodyn:
+// $_POST OCH $_FILES blir tomma trots att data skickades, och Content-Length
+// är satt. Fånga det här så en för stor uppladdning ger ett begripligt fel
+// i stället för att falla igenom till nedladdnings-grenen ("Ingen URL angiven").
+if (empty($_POST) && empty($_FILES) && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+    echo json_encode([
+        'success' => false,
+        'error'   => 'Filen är för stor för serverns uppladdningstak (post_max_size).',
+    ]);
+    exit;
+}
+
 $action = $_POST['action'] ?? '';
 
 // ── Kontrollera jobb-status ───────────────────
@@ -140,6 +152,85 @@ if ($action === 'delete') {
     } else {
         echo json_encode(['success' => false, 'error' => 'Ogiltig filsökväg.']);
     }
+    exit;
+}
+
+// ── Ladda upp egen ljudfil ────────────────────
+if ($action === 'upload') {
+    $file = $_FILES['audio'] ?? null;
+    $err  = is_array($file) ? ($file['error'] ?? UPLOAD_ERR_NO_FILE) : UPLOAD_ERR_NO_FILE;
+
+    if ($err === UPLOAD_ERR_INI_SIZE || $err === UPLOAD_ERR_FORM_SIZE) {
+        echo json_encode(['success' => false, 'error' => 'Filen är för stor för serverns uppladdningstak.']);
+        exit;
+    }
+    if ($err === UPLOAD_ERR_NO_FILE) {
+        echo json_encode(['success' => false, 'error' => 'Ingen fil vald.']);
+        exit;
+    }
+    if ($err !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name'])) {
+        echo json_encode(['success' => false, 'error' => 'Uppladdningen misslyckades.']);
+        exit;
+    }
+
+    // Validera filändelse mot samma whitelist som listning/RSS.
+    $allowedExt = ['mp3', 'm4a', 'ogg', 'opus', 'wav'];
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    if (!in_array($ext, $allowedExt, true)) {
+        echo json_encode(['success' => false, 'error' => 'Filformatet stöds inte (tillåtna: mp3, m4a, ogg, opus, wav).']);
+        exit;
+    }
+
+    // Sekundär MIME-kontroll — lita inte blint på klientens filnamn.
+    // m4a/mp4 detekteras ofta som video/mp4 eller audio/mp4, därav den breda listan.
+    $allowedMime = [
+        'audio/mpeg', 'audio/mp3',
+        'audio/mp4', 'audio/x-m4a', 'video/mp4',
+        'audio/ogg', 'application/ogg', 'audio/opus',
+        'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/vnd.wave',
+    ];
+    $mime = function_exists('finfo_open')
+        ? finfo_file(finfo_open(FILEINFO_MIME_TYPE), $file['tmp_name'])
+        : ($file['type'] ?? '');
+    if (!in_array($mime, $allowedMime, true)) {
+        echo json_encode(['success' => false, 'error' => 'Filen verkar inte vara en giltig ljudfil (' . $mime . ').']);
+        exit;
+    }
+
+    if (!is_dir(DOWNLOADS_DIR)) {
+        mkdir(DOWNLOADS_DIR, 0755, true);
+    }
+
+    // Sanera basnamnet med samma regel som titel-rename i ?action=check.
+    $rawBase  = pathinfo($file['name'], PATHINFO_FILENAME);
+    $safeBase = preg_replace('/[^a-zA-Z0-9åäöÅÄÖ._-]/', '_', $rawBase);
+    $safeBase = preg_replace('/_+/', '_', trim($safeBase, '_.'));
+    if ($safeBase === '') {
+        $safeBase = 'uppladdning';
+    }
+
+    // Hitta ledigt filnamn — kollisionssuffix -1, -2, … så inget skrivs över.
+    $finalBase = $safeBase;
+    $i = 1;
+    while (file_exists(DOWNLOADS_DIR . '/' . $finalBase . '.' . $ext)) {
+        $finalBase = $safeBase . '-' . $i;
+        $i++;
+    }
+    $destPath = DOWNLOADS_DIR . '/' . $finalBase . '.' . $ext;
+
+    if (!move_uploaded_file($file['tmp_name'], $destPath)) {
+        echo json_encode(['success' => false, 'error' => 'Kunde inte spara filen på servern.']);
+        exit;
+    }
+
+    // Valfri titel → sidecar (rå text, precis som scrape-flödet).
+    // Saknas titel härleder index.php/rss.php den från filnamnet (underscore → space).
+    $title = trim($_POST['title'] ?? '');
+    if ($title !== '') {
+        file_put_contents(DOWNLOADS_DIR . '/' . $finalBase . '.title', $title);
+    }
+
+    echo json_encode(['success' => true, 'filename' => $finalBase . '.' . $ext]);
     exit;
 }
 

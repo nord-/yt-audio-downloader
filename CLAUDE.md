@@ -6,7 +6,7 @@ En webbapp för Synology NAS (Apache + PHP 8) som extraherar ljud från videolä
 
 ```
 index.php        # UI + PHP-sida som listar nedladdade filer och städar skräp
-download.php     # POST-endpoint: start / check / delete
+download.php     # POST-endpoint: start / check / delete / upload
 worker.php       # CLI-only bakgrundsjobb – yt-dlp + ffmpeg, streamar progress
 rss.php          # RSS 2.0-flöde (iTunes-namespace) över samma filer
 downloads/       # Ljudfiler + dolda jobb-statusfiler (skapas automatiskt)
@@ -25,6 +25,8 @@ Ingen databas, ingen jobs-mapp – all jobbstatus lever som **dolda filer** (dot
    - Vid fel: skriver meddelande till `.<jobId>.err`, tar bort progress-filen.
 3. Frontend pollar `download.php?action=check` var 2:a sek. `check` läser `.err` → `.done` → `.progress` i tur och ordning och returnerar `{error}`, `{done, filename}` eller `{done: false, phase, percent}`.
 4. När `.done` hittas: om `.<jobId>.title` finns byter `check` namn på m4a:n till säker titel, annars lämnas `<jobId>.m4a`.
+
+**Uppladdning av egen fil** (`action=upload`): synkront flöde utan worker. Validerar `$_FILES['audio']` mot filändelse-whitelist (`mp3/m4a/ogg/opus/wav`) + en sekundär `finfo`-MIME-kontroll, sanerar basnamnet med samma regel som titel-rename, löser kollisioner med suffix `-1/-2/…`, kör `move_uploaded_file()` till `downloads/` och skriver valfri titel som `<basnamn>.title`-sidecar. Filen syns sedan automatiskt i listan och RSS:en. Begränsas av PHP:s `upload_max_filesize`/`post_max_size` på NAS:en.
 
 ## Progress-UI
 

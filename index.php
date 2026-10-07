@@ -166,7 +166,8 @@ function formatBytes(int $bytes): string {
             gap: 0.75rem;
         }
 
-        input[type="url"] {
+        input[type="url"],
+        input[type="text"] {
             flex: 1;
             background: #0f172a;
             border: 1px solid #475569;
@@ -178,9 +179,21 @@ function formatBytes(int $bytes): string {
             transition: border-color 0.2s;
         }
 
-        input[type="url"]:focus {
+        input[type="url"]:focus,
+        input[type="text"]:focus {
             border-color: #6366f1;
         }
+
+        /* Uppladdnings-raden får radbryta så fil + titel + knapp inte trängs på mobil */
+        .upload-row { flex-wrap: wrap; }
+
+        .upload-row input[type="file"] {
+            flex: 1 1 100%;
+            color: #cbd5e1;
+            font-size: 0.9rem;
+        }
+
+        .upload-row input[type="text"] { flex: 1 1 60%; }
 
         button {
             background: #6366f1;
@@ -198,7 +211,7 @@ function formatBytes(int $bytes): string {
         button:hover { background: #4f46e5; }
         button:disabled { background: #475569; cursor: not-allowed; }
 
-        #status {
+        .statusbox {
             margin-top: 1rem;
             padding: 0.75rem 1rem;
             border-radius: 8px;
@@ -206,7 +219,7 @@ function formatBytes(int $bytes): string {
             display: none;
         }
 
-        #status.loading {
+        .statusbox.loading {
             display: flex;
             align-items: center;
             gap: 0.75rem;
@@ -215,14 +228,14 @@ function formatBytes(int $bytes): string {
             color: #93c5fd;
         }
 
-        #status.success {
+        .statusbox.success {
             display: block;
             background: #14532d;
             border: 1px solid #16a34a;
             color: #86efac;
         }
 
-        #status.error {
+        .statusbox.error {
             display: block;
             background: #450a0a;
             border: 1px solid #dc2626;
@@ -437,7 +450,18 @@ function formatBytes(int $bytes): string {
             <input type="url" id="urlInput" placeholder="https://www.100.se/program/..." autocomplete="off">
             <button id="downloadBtn" onclick="startDownload()">Ladda ner</button>
         </div>
-        <div id="status"></div>
+        <div id="status" class="statusbox"></div>
+    </div>
+
+    <!-- Upload form -->
+    <div class="card">
+        <h2>Ladda upp egen fil</h2>
+        <div class="input-row upload-row">
+            <input type="file" id="fileInput" accept="audio/*">
+            <input type="text" id="uploadTitle" placeholder="Titel (valfritt)" autocomplete="off">
+            <button id="uploadBtn" onclick="startUpload()">Ladda upp</button>
+        </div>
+        <div id="uploadStatus" class="statusbox"></div>
     </div>
 
     <!-- File list -->
@@ -569,9 +593,9 @@ async function deleteFile(filename) {
     }
 }
 
-function showStatus(type, msg) {
-    const el = document.getElementById('status');
-    el.className = type;
+function showStatus(type, msg, elId = 'status') {
+    const el = document.getElementById(elId);
+    el.className = 'statusbox ' + type;
     el.style.display = '';
     if (type === 'loading') {
         el.innerHTML = '<div class="spinner"></div><span>' + msg + '</span>';
@@ -582,7 +606,7 @@ function showStatus(type, msg) {
 
 function showProgress(label, percent, indeterminate) {
     const el = document.getElementById('status');
-    el.className = 'loading';
+    el.className = 'statusbox loading';
     el.style.display = 'flex';
     const trackClass = indeterminate ? 'progress-track indeterminate' : 'progress-track';
     el.innerHTML =
@@ -596,6 +620,44 @@ function showProgress(label, percent, indeterminate) {
 
 function escHtml(str) {
     return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function startUpload() {
+    const fileInput  = document.getElementById('fileInput');
+    const titleInput = document.getElementById('uploadTitle');
+    const btn        = document.getElementById('uploadBtn');
+
+    if (!fileInput.files || fileInput.files.length === 0) {
+        showStatus('error', 'Välj en fil att ladda upp.', 'uploadStatus');
+        return;
+    }
+
+    const fd = new FormData();
+    fd.append('action', 'upload');
+    fd.append('audio', fileInput.files[0]);
+    fd.append('title', titleInput.value.trim());
+
+    btn.disabled = true;
+    showStatus('loading', 'Laddar upp...', 'uploadStatus');
+
+    try {
+        // Ingen Content-Type-header — låt webbläsaren sätta multipart-boundary.
+        const resp = await fetch('download.php', { method: 'POST', body: fd });
+        const data = await resp.json();
+
+        if (data.success) {
+            showStatus('success', '&#10003; Uppladdad! "' + escHtml(data.filename) + '"', 'uploadStatus');
+            fileInput.value = '';
+            titleInput.value = '';
+            setTimeout(() => location.reload(), 1200);
+        } else {
+            showStatus('error', '&#10007; Fel: ' + escHtml(data.error || 'Okänt fel.'), 'uploadStatus');
+            btn.disabled = false;
+        }
+    } catch (e) {
+        showStatus('error', '&#10007; Nätverksfel: ' + e.message, 'uploadStatus');
+        btn.disabled = false;
+    }
 }
 
 document.getElementById('urlInput').addEventListener('keydown', e => {
