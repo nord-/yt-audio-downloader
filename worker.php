@@ -26,7 +26,9 @@ $errFile  = DOWNLOADS_DIR . '/.' . $jobId . '.err';
 $doneFile = DOWNLOADS_DIR . '/.' . $jobId . '.done';
 $progFile = DOWNLOADS_DIR . '/.' . $jobId . '.progress';
 
+$startTime   = time();
 $lastPercent = 0;
+$lastLogged  = 0;
 $lastWrite   = 0;
 
 // Atomisk skrivning — frontend ska aldrig se en halvskriven JSON
@@ -44,6 +46,13 @@ function cleanup_partials(string $downloadsDir, string $jobId): void {
     }
 }
 
+// Loggrad med tidsstämpel och sekunder sedan workern startade
+function log_line($log, string $msg): void {
+    global $startTime;
+    fwrite($log, sprintf("[%s +%ds] %s\n", date('H:i:s'), time() - $startTime, $msg));
+    fflush($log);
+}
+
 function error_exit(string $errFile, string $progFile, string $msg, $log = null): never {
     file_put_contents($errFile, $msg);
     @unlink($progFile);
@@ -59,6 +68,7 @@ if ($log === false) {
 }
 
 // ── Steg 1: yt-dlp laddar ner video ──────────
+log_line($log, "worker start, url=$url");
 write_progress($progFile, ['phase' => 'download', 'percent' => 0, 'updated_at' => time()]);
 
 // --newline tvingar yt-dlp att avsluta progress-rader med \n istället för \r,
@@ -78,6 +88,7 @@ $dlCmd = implode(' ', [
     '2>&1',
 ]);
 
+log_line($log, 'yt-dlp: ' . $dlCmd);
 $fp = popen($dlCmd, 'r');
 if (!$fp) {
     error_exit($errFile, $progFile, 'Kunde inte starta yt-dlp.', $log);
@@ -86,8 +97,13 @@ if (!$fp) {
 $lastError = '';
 while (($line = fgets($fp)) !== false) {
     $line = rtrim($line);
-    fwrite($log, $line . "\n");
-    fflush($log);
+
+    // Progress-rader loggas max var 5:e sekund, övriga rader alltid
+    $isProgress = str_starts_with($line, '[download]') && str_contains($line, '%');
+    if (!$isProgress || (time() - $lastLogged) >= 5 || preg_match('/\s100(\.0)?%/', $line)) {
+        log_line($log, $line);
+        if ($isProgress) $lastLogged = time();
+    }
 
     // [download]  12.3% of ~123.45MiB at 1.23MiB/s ETA 00:45
     if (preg_match('/\[download\]\s+(\d+(?:\.\d+)?)%/', $line, $m)) {
@@ -111,6 +127,7 @@ while (($line = fgets($fp)) !== false) {
 }
 
 $status = pclose($fp);
+log_line($log, "yt-dlp klar, exit=$status");
 if ($status !== 0) {
     cleanup_partials(DOWNLOADS_DIR, $jobId);
     error_exit($errFile, $progFile, $lastError ?: 'Nedladdning misslyckades.', $log);
@@ -156,6 +173,7 @@ function run_ffmpeg(string $mp4File, string $m4aFile, array $audioArgs, $log): a
     return [$ok, $last];
 }
 
+log_line($log, 'ffmpeg-steg start');
 // Första försöket: kopiera ljudspåret utan omkodning. Misslyckas det (t.ex. om
 // källan inte är AAC) faller vi tillbaka på omkodning till AAC.
 [$ok, $ffErr] = run_ffmpeg($mp4File, $m4aFile, ['-c:a', 'copy', '-bsf:a', 'aac_adtstoasc'], $log);
@@ -165,6 +183,7 @@ if (!$ok) {
     [$ok, $ffErr] = run_ffmpeg($mp4File, $m4aFile, ['-c:a', 'aac', '-b:a', '128k'], $log);
 }
 
+log_line($log, 'ffmpeg-steg klart, ok=' . ($ok ? 'ja' : 'nej'));
 if (!$ok) {
     cleanup_partials(DOWNLOADS_DIR, $jobId);
     error_exit($errFile, $progFile, 'Konvertering misslyckades: ' . $ffErr, $log);
@@ -174,4 +193,5 @@ if (!$ok) {
 @unlink($mp4File);
 @unlink($progFile);
 touch($doneFile);
+log_line($log, 'klart, totalt ' . (time() - $startTime) . 's');
 fclose($log);

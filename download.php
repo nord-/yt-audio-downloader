@@ -50,7 +50,7 @@ if ($action === 'check') {
     // Kolla om ett fel uppstod
     if (file_exists($errFile)) {
         $errMsg = trim(file_get_contents($errFile));
-        @unlink($errFile); @unlink($logFile); @unlink($progFile);
+        @unlink($errFile); @unlink($progFile);   // .log behålls för felsökning (städas efter 24h av index.php)
         @unlink($titleFile); @unlink($descFile); @unlink($imgFile);
         echo json_encode(['done' => false, 'error' => $errMsg ?: 'Nedladdning misslyckades.']);
         exit;
@@ -91,7 +91,6 @@ if ($action === 'check') {
             @rename($imgFile, $destImg);
         }
 
-        @unlink($logFile);
         echo json_encode(['done' => true, 'filename' => $finalBase . '.m4a']);
         exit;
     }
@@ -104,7 +103,7 @@ if ($action === 'check') {
         if (is_array($prog) && isset($prog['phase'])) {
             $age = time() - (int) ($prog['updated_at'] ?? 0);
             if ($age > 600) {
-                @unlink($logFile); @unlink($progFile);
+                @unlink($progFile);
                 echo json_encode(['done' => false, 'error' => 'Nedladdningen tog för lång tid.']);
                 exit;
             }
@@ -119,7 +118,7 @@ if ($action === 'check') {
 
     // Progress-fil saknas eller är korrupt — fallback till log-mtime som livstecken
     if (file_exists($logFile) && (time() - filemtime($logFile)) > 600) {
-        @unlink($logFile); @unlink($progFile);
+        @unlink($progFile);
         echo json_encode(['done' => false, 'error' => 'Nedladdningen tog för lång tid.']);
         exit;
     }
@@ -361,6 +360,7 @@ function extract_text_xl_description(string $html): string {
 $downloadTitle = null;
 $downloadDesc  = null;
 $downloadImage = null;
+$scrapeStart = microtime(true);
 if (str_contains($url, '100.se')) {
     $extracted = extract_100se($url);
     if (!empty($extracted['url']))         $url           = $extracted['url'];
@@ -371,6 +371,13 @@ if (str_contains($url, '100.se')) {
 
 // Unikt jobb-ID — används som temporärt filnamn
 $jobId = bin2hex(random_bytes(8));
+
+// Första raden i jobbloggen: hur lång tid skrapningen tog och vilken URL som används
+@file_put_contents(
+    DOWNLOADS_DIR . '/.' . $jobId . '.log',
+    sprintf("[%s] download.php: skrapning %.1fs, url=%s\n", date('H:i:s'), microtime(true) - $scrapeStart, $url),
+    FILE_APPEND
+);
 
 // Spara rå titel — används både för filsystem-rename (saneras on-the-fly) och
 // som RSS-titel (original-text med frågetecken, punkter osv bevaras).
