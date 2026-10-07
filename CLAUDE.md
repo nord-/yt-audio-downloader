@@ -20,7 +20,7 @@ Ingen databas, ingen jobs-mapp – all jobbstatus lever som **dolda filer** (dot
 2. `worker.php` (CLI) kör:
    - `popen()` på yt-dlp med `--newline` → läser progress-rader ("[download] 12.3% of …") löpande.
    - Varje ny procent-siffra skrivs throttlat (max var 2:a sek) till `.<jobId>.progress` som JSON via tmp+rename (atomiskt).
-   - När yt-dlp är klar: sätter `phase=convert` i progress-filen, kör `ffmpeg -acodec copy` för ljudspåret.
+   - När yt-dlp är klar: sätter `phase=convert` i progress-filen, kör ffmpeg för ljudspåret: först `-c:a copy -bsf:a aac_adtstoasc` (ingen omkodning), och bara om det misslyckas (källan är inte AAC) omkodning till AAC 128k. `updated_at` i progress-filen uppdateras löpande även under omkodning, så en lång omkodning inte tolkas som hängning. ffmpeg skriver till dold `.<jobId>.tmp.m4a` som döps om till `<jobId>.m4a` först när allt lyckats.
    - Vid lyckat slut: städar upp och `touch .<jobId>.done`.
    - Vid fel: skriver meddelande till `.<jobId>.err`, tar bort progress-filen.
 3. Frontend pollar `download.php?action=check` var 2:a sek. `check` läser `.err` → `.done` → `.progress` i tur och ordning och returnerar `{error}`, `{done, filename}` eller `{done: false, phase, percent}`.
@@ -42,7 +42,7 @@ Frontend växlar mellan **determinate bar** (procent under `phase=download`) och
 
 ## Viktiga beslut
 
-- **Två-stegsnedladdning (mp4 → m4a via `-acodec copy`)** i stället för yt-dlp-inbyggd `-x --audio-format mp3` – undviker omkodning, bevarar källkvalitet, snabbare på NAS:ens svaga CPU.
+- **Två-stegsnedladdning (yt-dlp hämtar ljudspåret → ffmpeg `-c:a copy` till m4a)** i stället för yt-dlp-inbyggd `-x --audio-format mp3` – undviker omkodning i normalfallet, bevarar källkvalitet, snabbare på NAS:ens svaga CPU. yt-dlp körs med `-f 'ba[acodec^=mp4a]/ba/b'` (bara ljud, AAC föredras så att copy räcker). **Undantag:** om källans ljud inte är AAC (t.ex. Opus/WebM från YouTube) misslyckas copy och workern omkodar till AAC 128k – långsammare och förlustbehäftat. `--referer` skickas bara till 100.se/Bunny-URL:er.
 - **CLI-worker via popen() i stället för shell-pipeline** – tidigare kedjades yt-dlp och ffmpeg med `&& ... ||` i en lång `nohup sh -c`. Det gjorde att vi inte kunde parsa yt-dlps progress. Nu: `worker.php` läser stdout rad för rad och skriver strukturerad status.
 - **Throttling (2 sek) på progress-writes** – undviker att skriva 20+ gånger/sek vid snabba nedladdningar. Matchar frontendens pollintervall.
 - **Atomisk JSON-write (tmp + rename)** – frontend kan aldrig läsa en halvskriven progress-fil.
@@ -50,7 +50,7 @@ Frontend växlar mellan **determinate bar** (procent under `phase=download`) och
 - **Polling via `check` med `.done`-sentinel** – `.done` skapas *efter* ffmpeg, så klienten ser aldrig en halv fil.
 - **Hängnings-detektion**: om progress-filens `updated_at` är äldre än 10 min rapporteras jobbet som misslyckat (worker har dött men progress-filen ligger kvar). Saknas progress-filen helt används `.log`-mtime som fallback-livstecken.
 - **100.se-scraping** pekar på master-playlisten `playlist.m3u8` (Bunny levererar ljudet som separat rendition, så `360p/video.m3u8` saknar ljud). yt-dlp körs med `--referer https://www.100.se/`.
-- **Snabbväg för Bunny-HLS**: för URL:er som matchar `https://vz-*.b-cdn.net/<guid>/playlist.m3u8` kör `worker.php` ffmpeg direkt, först mot `<guid>/audio/audio.m3u8` (bara ljud) och sedan master-playlisten (`-vn -c:a copy -bsf:a aac_adtstoasc`, progress via `-progress pipe:1`). Sparar yt-dlps uppstart (~15 s på NAS:en, 40 s → ca 20 s för 18 min ljud). Misslyckas det faller workern tillbaka på yt-dlp-flödet.
+- **Snabbväg för Bunny-HLS**: för URL:er som matchar `https://vz-*.b-cdn.net/<guid>/playlist.m3u8` kör `worker.php` ffmpeg direkt, först mot ljudrenditionen (URI ur `#EXT-X-MEDIA:TYPE=AUDIO` i master-playlisten, i praktiken `<guid>/audio/audio.m3u8`) och sedan master-playlisten (`-vn -c:a copy -bsf:a aac_adtstoasc`, progress via `-progress pipe:1`). Sparar yt-dlps uppstart (~15 s på NAS:en, 40 s → ca 20 s för 18 min ljud). ffmpeg körs med `-rw_timeout 30000000` (30 s utan data avbryter) så en hängd CDN-anslutning inte låser workern. Misslyckas det faller workern tillbaka på yt-dlp-flödet.
 - **Filnamnsstrategi**: jobId används som temporärt filnamn under körning. Titeln saneras (`[^a-zA-Z0-9åäöÅÄÖ_-]` → `_`) och skrivs till `.<jobId>.title`; byte sker i `check` efter `.done`.
 - **Städning vid varje index-laddning**: dolda filer > 24h, icke-ljudfiler > 1h (fångar yt-dlp-krascher som lämnat kvar mp4). Ljudfiler rensas aldrig automatiskt.
 - **RSS kräver inget admingränssnitt** – `rss.php` bygger bas-URL från `$_SERVER` och listar samma filer som `index.php`.

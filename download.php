@@ -413,8 +413,10 @@ exec($bgCmd, $bgOutput, $bgExitCode);
 
 if ($bgExitCode !== 0) {
     // Om själva bakgrundsstarten failade (t.ex. php/nohup saknas) har vi ingen
-    // worker som kommer skriva .err — rapportera direkt och städa titel-filen.
-    @unlink(DOWNLOADS_DIR . '/.' . $jobId . '.title');
+    // worker som kommer skriva .err — rapportera direkt och städa alla sidecars.
+    foreach (['title', 'desc', 'imageurl', 'log'] as $ext) {
+        @unlink(DOWNLOADS_DIR . '/.' . $jobId . '.' . $ext);
+    }
     http_response_code(500);
     echo json_encode([
         'success' => false,

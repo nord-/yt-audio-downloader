@@ -51,7 +51,6 @@ foreach (glob(DOWNLOADS_DIR . '/.*.done') as $doneFile) {
         @rename($imgFile, $destImg);
     }
     @unlink($doneFile);
-    @unlink(DOWNLOADS_DIR . '/.' . $jid . '.log');
     @unlink(DOWNLOADS_DIR . '/.' . $jid . '.progress');
 }
 
