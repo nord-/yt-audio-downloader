@@ -50,6 +50,7 @@ Frontend växlar mellan **determinate bar** (procent under `phase=download`) och
 - **Polling via `check` med `.done`-sentinel** – `.done` skapas *efter* ffmpeg, så klienten ser aldrig en halv fil.
 - **Hängnings-detektion**: om progress-filens `updated_at` är äldre än 10 min rapporteras jobbet som misslyckat (worker har dött men progress-filen ligger kvar). Saknas progress-filen helt används `.log`-mtime som fallback-livstecken.
 - **100.se-scraping** pekar på master-playlisten `playlist.m3u8` (Bunny levererar ljudet som separat rendition, så `360p/video.m3u8` saknar ljud). yt-dlp körs med `--referer https://www.100.se/`.
+- **Snabbväg för Bunny-HLS**: för URL:er som matchar `https://vz-*.b-cdn.net/<guid>/playlist.m3u8` kör `worker.php` ffmpeg direkt, först mot `<guid>/audio/audio.m3u8` (bara ljud) och sedan master-playlisten (`-vn -c:a copy -bsf:a aac_adtstoasc`, progress via `-progress pipe:1`). Sparar yt-dlps uppstart (~15 s på NAS:en, 40 s → ca 20 s för 18 min ljud). Misslyckas det faller workern tillbaka på yt-dlp-flödet.
 - **Filnamnsstrategi**: jobId används som temporärt filnamn under körning. Titeln saneras (`[^a-zA-Z0-9åäöÅÄÖ_-]` → `_`) och skrivs till `.<jobId>.title`; byte sker i `check` efter `.done`.
 - **Städning vid varje index-laddning**: dolda filer > 24h, icke-ljudfiler > 1h (fångar yt-dlp-krascher som lämnat kvar mp4). Ljudfiler rensas aldrig automatiskt.
 - **RSS kräver inget admingränssnitt** – `rss.php` bygger bas-URL från `$_SERVER` och listar samma filer som `index.php`.
