@@ -297,7 +297,7 @@ function extract_100se(string $pageUrl): array {
         // Hämta BunnyCDN-hostname från og:image om möjligt (konstruera HLS-URL).
         // Faller annars tillbaka till iframe-URL:en direkt (stöds av moderna yt-dlp).
         if (preg_match('~content="(https://vz-[a-f0-9-]+\.b-cdn\.net)/' . preg_quote($videoGuid, '~') . '/~', $html, $cdn)) {
-            $result['url'] = "{$cdn[1]}/{$videoGuid}/360p/video.m3u8";
+            $result['url'] = "{$cdn[1]}/{$videoGuid}/playlist.m3u8";
         } else {
             $result['url'] = "https://iframe.mediadelivery.net/embed/{$libId}/{$videoGuid}";
         }
@@ -310,7 +310,7 @@ function extract_100se(string $pageUrl): array {
         // Fallback till gammal metod om iframe-extraktion ovan misslyckades
         if (!isset($result['url'])
             && preg_match('~^https://(vz-[a-f0-9-]+\.b-cdn\.net)/([a-f0-9-]{36})/~', $m[1], $mm)) {
-            $result['url'] = "https://{$mm[1]}/{$mm[2]}/360p/video.m3u8";
+            $result['url'] = "https://{$mm[1]}/{$mm[2]}/playlist.m3u8";
         }
     }
 

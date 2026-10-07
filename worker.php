@@ -69,6 +69,8 @@ $dlCmd = implode(' ', [
     '-N', '4',
     '--newline',
     '--no-playlist',
+    '-f', 'ba/b',
+    '--referer', 'https://www.100.se/',
     '--restrict-filenames',
     '--ffmpeg-location', escapeshellarg(FFMPEG_PATH),
     '-o', escapeshellarg($mp4File),
@@ -127,30 +129,45 @@ write_progress($progFile, [
     'updated_at' => time(),
 ]);
 
-$ffCmd = implode(' ', [
-    escapeshellarg(FFMPEG_PATH),
-    '-y',
-    '-i', escapeshellarg($mp4File),
-    '-vn',
-    '-acodec', 'copy',
-    escapeshellarg($m4aFile),
-    '2>&1',
-]);
-
-$fp = popen($ffCmd, 'r');
-if (!$fp) {
-    cleanup_partials(DOWNLOADS_DIR, $jobId);
-    error_exit($errFile, $progFile, 'Kunde inte starta ffmpeg.', $log);
+// Kör ffmpeg med givna ljudargument. Returnerar [lyckades, sista felraden].
+function run_ffmpeg(string $mp4File, string $m4aFile, array $audioArgs, $log): array {
+    $cmd = implode(' ', array_merge([
+        escapeshellarg(FFMPEG_PATH),
+        '-y',
+        '-i', escapeshellarg($mp4File),
+        '-vn',
+        '-map', '0:a:0',
+    ], $audioArgs, [
+        escapeshellarg($m4aFile),
+        '2>&1',
+    ]));
+    fwrite($log, "\n$ " . $cmd . "\n");
+    $fp = popen($cmd, 'r');
+    if (!$fp) return [false, 'Kunde inte starta ffmpeg.'];
+    $last = '';
+    while (($line = fgets($fp)) !== false) {
+        $line = rtrim($line);
+        fwrite($log, $line . "\n");
+        fflush($log);
+        if ($line !== '') $last = $line;
+    }
+    $status = pclose($fp);
+    $ok = $status === 0 && file_exists($m4aFile) && filesize($m4aFile) > 0;
+    return [$ok, $last];
 }
-while (($line = fgets($fp)) !== false) {
-    fwrite($log, rtrim($line) . "\n");
-    fflush($log);
-}
-$status = pclose($fp);
 
-if ($status !== 0 || !file_exists($m4aFile)) {
+// Första försöket: kopiera ljudspåret utan omkodning. Misslyckas det (t.ex. om
+// källan inte är AAC) faller vi tillbaka på omkodning till AAC.
+[$ok, $ffErr] = run_ffmpeg($mp4File, $m4aFile, ['-c:a', 'copy', '-bsf:a', 'aac_adtstoasc'], $log);
+if (!$ok) {
+    fwrite($log, "Copy misslyckades, försöker omkoda till AAC\n");
+    @unlink($m4aFile);
+    [$ok, $ffErr] = run_ffmpeg($mp4File, $m4aFile, ['-c:a', 'aac', '-b:a', '128k'], $log);
+}
+
+if (!$ok) {
     cleanup_partials(DOWNLOADS_DIR, $jobId);
-    error_exit($errFile, $progFile, 'Konvertering misslyckades.', $log);
+    error_exit($errFile, $progFile, 'Konvertering misslyckades: ' . $ffErr, $log);
 }
 
 // Klart — städa upp och signalera done
