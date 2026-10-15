@@ -449,7 +449,7 @@ function formatBytes(int $bytes): string {
             <input type="url" id="urlInput" placeholder="https://www.100.se/program/..." autocomplete="off">
             <button id="downloadBtn" onclick="startDownload()">Ladda ner</button>
         </div>
-        <div id="status" class="statusbox"></div>
+        <div id="jobs"></div>
     </div>
 
     <!-- Upload form -->
@@ -503,17 +503,39 @@ function formatBytes(int $bytes): string {
 </div>
 
 <script>
-let pollTimer = null;
+// Each download gets its own status row in #jobs and its own poll timer, so
+// several jobs can run side by side. The page reloads (to show the new files in
+// the list) only once nothing a reload would interrupt is left: `busy` counts
+// start requests and uploads in flight as well as jobs being polled.
+let busy = 0;
+let anySucceeded = false;
+let anyFailed = false;
+let reloadHint = null;
+let validationRow = null;
 
 async function startDownload() {
     const urlInput = document.getElementById('urlInput');
     const btn      = document.getElementById('downloadBtn');
     const url      = urlInput.value.trim();
 
-    if (!url) { showStatus('error', 'Ange en URL.'); return; }
+    // Enter in the URL field bypasses the disabled button, so check it here too.
+    if (btn.disabled) return;
 
+    if (!url) {
+        validationRow ??= addJobRow();
+        showStatus('error', 'Ange en URL.', validationRow);
+        return;
+    }
+    validationRow?.remove();
+    validationRow = null;
+
+    const row = addJobRow();
+
+    // Disabled only while the job is being started (100.se scraping takes a few
+    // seconds), so a double click cannot start the same download twice.
     btn.disabled = true;
-    showStatus('loading', 'Startar nedladdning...');
+    busy++;
+    showStatus('loading', 'Startar nedladdning...', row);
 
     try {
         const resp = await fetch('download.php', {
@@ -524,28 +546,29 @@ async function startDownload() {
         const data = await resp.json();
 
         if (data.pending) {
-            // Jobbet körs i bakgrunden — starta polling
+            // The job runs in the background - start polling; it stays counted in `busy`
             urlInput.value = '';
-            pollJob(data.job_id);
-        } else if (data.success) {
-            showStatus('success', '&#10003; Klar! "' + escHtml(data.filename) + '"');
-            urlInput.value = '';
-            btn.disabled = false;
-            setTimeout(() => location.reload(), 1500);
+            pollJob(data.job_id, row);
         } else {
-            showStatus('error', '&#10007; Fel: ' + escHtml(data.error));
-            btn.disabled = false;
+            showStatus('error', '&#10007; Fel: ' + escHtml(data.error || 'Okänt fel.'), row);
+            finishJob(false);
         }
     } catch (e) {
-        showStatus('error', '&#10007; Nätverksfel: ' + e.message);
-        btn.disabled = false;
+        showStatus('error', '&#10007; Nätverksfel: ' + e.message, row);
+        finishJob(false);
     }
+    btn.disabled = false;
 }
 
-function pollJob(jobId) {
-    clearInterval(pollTimer);
+function addJobRow() {
+    const row = document.createElement('div');
+    row.className = 'statusbox';
+    document.getElementById('jobs').appendChild(row);
+    return row;
+}
 
-    pollTimer = setInterval(async () => {
+function pollJob(jobId, row) {
+    const timer = setInterval(async () => {
         try {
             const resp = await fetch('download.php', {
                 method: 'POST',
@@ -555,25 +578,48 @@ function pollJob(jobId) {
             const data = await resp.json();
 
             if (data.done) {
-                clearInterval(pollTimer);
-                document.getElementById('downloadBtn').disabled = false;
-                showStatus('success', '&#10003; Klar! "' + escHtml(data.filename) + '"');
-                setTimeout(() => location.reload(), 1500);
+                clearInterval(timer);
+                showStatus('success', '&#10003; Klar! "' + escHtml(data.filename) + '"', row);
+                finishJob(true);
             } else if (data.error) {
-                clearInterval(pollTimer);
-                document.getElementById('downloadBtn').disabled = false;
-                showStatus('error', '&#10007; Fel: ' + escHtml(data.error));
+                clearInterval(timer);
+                showStatus('error', '&#10007; Fel: ' + escHtml(data.error), row);
+                finishJob(false);
             } else if (data.phase === 'download') {
-                showProgress('Laddar ner... ' + (data.percent ?? 0) + '%', data.percent ?? 0, false);
+                showProgress('Laddar ner... ' + (data.percent ?? 0) + '%', data.percent ?? 0, false, row);
             } else if (data.phase === 'convert') {
-                showProgress('Konverterar till ljud...', 100, true);
+                showProgress('Konverterar till ljud...', 100, true, row);
             } else {
-                showProgress('Startar...', 0, true);
+                showProgress('Startar...', 0, true, row);
             }
         } catch (e) {
-            // Tillfälligt nätverksfel — fortsätt polla
+            // Temporary network error - keep polling
         }
     }, 2000);
+}
+
+// Called once for every `busy++`: when a polled job, a failed start or an upload settles.
+function finishJob(succeeded) {
+    busy--;
+    if (succeeded) anySucceeded = true; else anyFailed = true;
+    reloadWhenIdle();
+}
+
+// Reload so new files show up in the list, but never while a request or job is
+// still in flight, and never over a visible error message - then show a hint instead.
+function reloadWhenIdle() {
+    if (busy > 0 || !anySucceeded) return;
+    if (anyFailed) {
+        if (!reloadHint) {
+            reloadHint = addJobRow();
+            showStatus('success', '<a href="" style="color:inherit">Ladda om sidan</a> för att se de nya filerna i listan.', reloadHint);
+        }
+        return;
+    }
+    // A job started or failed during the delay re-runs the check instead.
+    setTimeout(() => {
+        if (busy === 0 && !anyFailed) location.reload(); else reloadWhenIdle();
+    }, 1500);
 }
 
 async function deleteFile(filename) {
@@ -592,8 +638,7 @@ async function deleteFile(filename) {
     }
 }
 
-function showStatus(type, msg, elId = 'status') {
-    const el = document.getElementById(elId);
+function showStatus(type, msg, el) {
     el.className = 'statusbox ' + type;
     el.style.display = '';
     if (type === 'loading') {
@@ -603,8 +648,7 @@ function showStatus(type, msg, elId = 'status') {
     }
 }
 
-function showProgress(label, percent, indeterminate) {
-    const el = document.getElementById('status');
+function showProgress(label, percent, indeterminate, el) {
     el.className = 'statusbox loading';
     el.style.display = 'flex';
     const trackClass = indeterminate ? 'progress-track indeterminate' : 'progress-track';
@@ -625,9 +669,10 @@ async function startUpload() {
     const fileInput  = document.getElementById('fileInput');
     const titleInput = document.getElementById('uploadTitle');
     const btn        = document.getElementById('uploadBtn');
+    const status     = document.getElementById('uploadStatus');
 
     if (!fileInput.files || fileInput.files.length === 0) {
-        showStatus('error', 'Välj en fil att ladda upp.', 'uploadStatus');
+        showStatus('error', 'Välj en fil att ladda upp.', status);
         return;
     }
 
@@ -637,26 +682,28 @@ async function startUpload() {
     fd.append('title', titleInput.value.trim());
 
     btn.disabled = true;
-    showStatus('loading', 'Laddar upp...', 'uploadStatus');
+    busy++;
+    showStatus('loading', 'Laddar upp...', status);
 
+    let succeeded = false;
     try {
         // No Content-Type header - let the browser set the multipart boundary.
         const resp = await fetch('download.php', { method: 'POST', body: fd });
         const data = await resp.json();
 
         if (data.success) {
-            showStatus('success', '&#10003; Uppladdad! "' + escHtml(data.filename) + '"', 'uploadStatus');
+            showStatus('success', '&#10003; Uppladdad! "' + escHtml(data.filename) + '"', status);
             fileInput.value = '';
             titleInput.value = '';
-            setTimeout(() => location.reload(), 1200);
+            succeeded = true;
         } else {
-            showStatus('error', '&#10007; Fel: ' + escHtml(data.error || 'Okänt fel.'), 'uploadStatus');
-            btn.disabled = false;
+            showStatus('error', '&#10007; Fel: ' + escHtml(data.error || 'Okänt fel.'), status);
         }
     } catch (e) {
-        showStatus('error', '&#10007; Nätverksfel: ' + e.message, 'uploadStatus');
-        btn.disabled = false;
+        showStatus('error', '&#10007; Nätverksfel: ' + e.message, status);
     }
+    btn.disabled = false;
+    finishJob(succeeded);
 }
 
 document.getElementById('urlInput').addEventListener('keydown', e => {
