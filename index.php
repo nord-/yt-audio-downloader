@@ -207,6 +207,15 @@ function formatBytes(int $bytes): string {
             white-space: nowrap;
         }
 
+        .btn-fetch {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.45rem;
+        }
+
+        .btn-fetch svg { width: 1.1em; height: 1.1em; flex-shrink: 0; }
+
         button:hover { background: #4f46e5; }
         button:disabled { background: #475569; cursor: not-allowed; }
 
@@ -407,7 +416,7 @@ function formatBytes(int $bytes): string {
             font-size: 0.9rem;
         }
 
-        /* On phones: collapse the download button to icon only, let desc/meta span full width */
+        /* On phones: collapse the download buttons to icon only, let desc/meta span full width */
         @media (max-width: 560px) {
             body { padding: 1.25rem 0.75rem; }
 
@@ -421,7 +430,10 @@ function formatBytes(int $bytes): string {
                 column-gap: 0.5rem;
             }
 
-            .btn-download .btn-label { display: none; }
+            .btn-download .btn-label,
+            .btn-fetch .btn-label { display: none; }
+
+            .btn-fetch { padding: 0.65rem 0.9rem; }
 
             .btn-download,
             .btn-delete {
@@ -447,7 +459,11 @@ function formatBytes(int $bytes): string {
         <h2>Ladda ner nytt ljud</h2>
         <div class="input-row">
             <input type="url" id="urlInput" placeholder="https://www.100.se/program/..." autocomplete="off">
-            <button id="downloadBtn" onclick="startDownload()">Ladda ner</button>
+            <button id="downloadBtn" class="btn-fetch" onclick="startDownload()" aria-label="Ladda ner">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 3v12M7 10l5 5 5-5M4 17v3h16v-3"/>
+                </svg><span class="btn-label">Ladda ner</span>
+            </button>
         </div>
         <div id="status" class="statusbox"></div>
     </div>
