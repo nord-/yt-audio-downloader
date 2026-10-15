@@ -1,21 +1,21 @@
 <?php
 // ──────────────────────────────────────────────
-//  Konfiguration – anpassa efter din Synology
+//  Configuration – adjust to your Synology
 // ──────────────────────────────────────────────
-define('YTDLP_PATH',   '/volume1/@yt-dlp/yt-dlp');   // wrapper-skript på volymen
+define('YTDLP_PATH',   '/volume1/@yt-dlp/yt-dlp');   // wrapper script on the volume
 define('FFMPEG_PATH',  '/var/packages/ffmpeg7/target/bin/ffmpeg');    // SynoCommunity ffmpeg7
 define('DOWNLOADS_DIR', __DIR__ . '/downloads');
-define('DOWNLOADS_URL', 'downloads');               // relativ URL till mappen
+define('DOWNLOADS_URL', 'downloads');               // relative URL to the folder
 
-// Skapa downloads-mappen om den saknas
+// Create the downloads folder if it is missing
 if (!is_dir(DOWNLOADS_DIR)) {
     mkdir(DOWNLOADS_DIR, 0755, true);
 }
 
-// Fullfölj rename för jobb som blev klara medan klienten var borta.
-// Normalt sker renamet i download.php?action=check, men om användaren stängde
-// fliken mellan att worker skrev .done och nästa poll ligger sentinel-filerna
-// kvar och m4a:n heter fortfarande <jobId>.m4a.
+// Complete the rename for jobs that finished while the client was away.
+// Normally the rename happens in download.php?action=check, but if the user
+// closed the tab between the worker writing .done and the next poll, the
+// sentinel files remain and the m4a is still named <jobId>.m4a.
 foreach (glob(DOWNLOADS_DIR . '/.*.done') as $doneFile) {
     if (!preg_match('~/\.([a-f0-9]+)\.done$~', $doneFile, $m)) continue;
     $jid       = $m[1];
@@ -36,8 +36,8 @@ foreach (glob(DOWNLOADS_DIR . '/.*.done') as $doneFile) {
             }
         }
     }
-    // !file_exists-check: undvik att POSIX-rename skriver över en orphan-sidecar
-    // med samma basnamn (extremt sällsynt, men kirurgisk fix på reviewer-request).
+    // !file_exists check: keep POSIX rename from overwriting an orphan sidecar
+    // with the same base name (extremely rare, but a surgical fix per reviewer request).
     $destTitle = DOWNLOADS_DIR . '/' . $finalBase . '.title';
     if (is_file($titleFile) && !file_exists($destTitle)) {
         @rename($titleFile, $destTitle);
@@ -54,29 +54,29 @@ foreach (glob(DOWNLOADS_DIR . '/.*.done') as $doneFile) {
     @unlink(DOWNLOADS_DIR . '/.' . $jid . '.progress');
 }
 
-// Städa bort gamla jobb-filer (dolda filer äldre än 24h)
+// Clean up old job files (hidden files older than 24h)
 foreach (glob(DOWNLOADS_DIR . '/.*') as $hidden) {
     if (is_file($hidden) && (time() - filemtime($hidden)) > 86400) {
         @unlink($hidden);
     }
 }
-// Städa bort temp-videofiler som yt-dlp kan ha lämnat kvar vid krasch (äldre än 1h)
+// Clean up temp video files that yt-dlp may have left behind after a crash (older than 1h)
 foreach (glob(DOWNLOADS_DIR . '/*') as $f) {
     if (!is_file($f)) continue;
-    if (preg_match('/\.(mp3|m4a|ogg|opus|wav|title|desc|imageurl|jpg)$/i', $f)) continue;  // behåll färdiga ljudfiler + sidecars (.jpg = gamla thumbnails, används som fallback)
+    if (preg_match('/\.(mp3|m4a|ogg|opus|wav|title|desc|imageurl|jpg)$/i', $f)) continue;  // keep finished audio files + sidecars (.jpg = old thumbnails, used as fallback)
     if ((time() - filemtime($f)) > 3600) {
         @unlink($f);
     }
 }
 
-// Hämta lista med nedladdade filer
+// Fetch the list of downloaded files
 $files = [];
 if (is_dir(DOWNLOADS_DIR)) {
     foreach (scandir(DOWNLOADS_DIR) as $item) {
-        // Visa bara färdiga ljudfiler — dölj dolda filer, temporärfiler och skräp
-        if ($item[0] === '.') continue;                          // dolda filer (.log, .title, .htaccess osv)
-        if (!preg_match('/\.(mp3|m4a|ogg|opus|wav)$/i', $item)) continue;  // bara ljudformat
-        if (str_ends_with($item, '.part')) continue;             // ofärdiga nedladdningar
+        // Show only finished audio files — hide hidden files, temp files and junk
+        if ($item[0] === '.') continue;                          // hidden files (.log, .title, .htaccess etc.)
+        if (!preg_match('/\.(mp3|m4a|ogg|opus|wav)$/i', $item)) continue;  // audio formats only
+        if (str_ends_with($item, '.part')) continue;             // unfinished downloads
         $path = DOWNLOADS_DIR . '/' . $item;
         if (is_file($path)) {
             $fileBase  = pathinfo($item, PATHINFO_FILENAME);
@@ -86,7 +86,7 @@ if (is_dir(DOWNLOADS_DIR)) {
             $jpgPath    = DOWNLOADS_DIR . '/' . $fileBase . '.jpg';
             $title     = is_file($titlePath) ? trim(file_get_contents($titlePath)) : str_replace('_', ' ', $fileBase);
             $desc      = is_file($descPath)  ? trim(file_get_contents($descPath))  : '';
-            // .imageurl (ny modell) först, .jpg (gammal, lokal thumbnail) som fallback.
+            // .imageurl (new model) first, .jpg (old, local thumbnail) as fallback.
             $imageUrl  = is_file($imgUrlPath) ? trim(file_get_contents($imgUrlPath))
                        : (is_file($jpgPath)  ? DOWNLOADS_URL . '/' . rawurlencode($fileBase . '.jpg') : '');
             $files[] = [
@@ -160,8 +160,10 @@ function formatBytes(int $bytes): string {
             margin-bottom: 1rem;
         }
 
+        /* Rows may wrap so the button drops below the input on narrow screens */
         .input-row {
             display: flex;
+            flex-wrap: wrap;
             gap: 0.75rem;
         }
 
@@ -183,15 +185,13 @@ function formatBytes(int $bytes): string {
             border-color: #6366f1;
         }
 
-        /* Uppladdnings-raden får radbryta så fil + titel + knapp inte trängs på mobil */
-        .upload-row { flex-wrap: wrap; }
-
         .upload-row input[type="file"] {
             flex: 1 1 100%;
             color: #cbd5e1;
             font-size: 0.9rem;
         }
 
+        .input-row input[type="url"],
         .upload-row input[type="text"] { flex: 1 1 60%; }
 
         button {
@@ -407,7 +407,7 @@ function formatBytes(int $bytes): string {
             font-size: 0.9rem;
         }
 
-        /* På telefon: kollapsa download-knappen till bara ikon, låt desc/meta spänna full bredd */
+        /* On phones: collapse the download button to icon only, let desc/meta span full width */
         @media (max-width: 560px) {
             body { padding: 1.25rem 0.75rem; }
 
@@ -524,7 +524,7 @@ async function startDownload() {
         const data = await resp.json();
 
         if (data.pending) {
-            // Jobbet körs i bakgrunden — starta polling
+            // The job runs in the background — start polling
             urlInput.value = '';
             pollJob(data.job_id);
         } else if (data.success) {
@@ -571,7 +571,7 @@ function pollJob(jobId) {
                 showProgress('Startar...', 0, true);
             }
         } catch (e) {
-            // Tillfälligt nätverksfel — fortsätt polla
+            // Temporary network error — keep polling
         }
     }, 2000);
 }
@@ -640,7 +640,7 @@ async function startUpload() {
     showStatus('loading', 'Laddar upp...', 'uploadStatus');
 
     try {
-        // Ingen Content-Type-header — låt webbläsaren sätta multipart-boundary.
+        // No Content-Type header — let the browser set the multipart boundary.
         const resp = await fetch('download.php', { method: 'POST', body: fd });
         const data = await resp.json();
 
