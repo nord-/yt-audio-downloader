@@ -1,6 +1,9 @@
-# Nedladdade filer och jobb-state (skapas runtime av appen)
+# Downloaded files and job state (created at runtime by the app)
 downloads/
 
-# OS-filer
+# OS files
 .DS_Store
 Thumbs.db
+
+# Claude Code local state
+.claude/
