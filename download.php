@@ -362,13 +362,14 @@ $downloadTitle = null;
 $downloadDesc  = null;
 $downloadImage = null;
 $scrapeStart = microtime(true);
-if (str_contains($url, '100.se')) {
+// Värdnamn är skiftlägesokänsliga — jämför på normaliserad host, inte hela URL:en.
+$host = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
+if ($host === '100.se' || str_ends_with($host, '.100.se')) {
     $extracted = extract_100se($url);
 
     // yt-dlp saknar extraktor för 100.se — utan en Bunny-URL skulle jobbet bara
     // dö med "Unsupported URL". Ge ett begripligt fel direkt i stället.
-    $host = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
-    if (empty($extracted['url']) && ($host === '100.se' || str_ends_with($host, '.100.se'))) {
+    if (empty($extracted['url'])) {
         // Utan curl faller hämtningen tillbaka på file_get_contents(), som brukar
         // misslyckas i Web Stations PHP-profiler — säg det rakt ut.
         echo json_encode(['success' => false, 'error' => $extracted === null
