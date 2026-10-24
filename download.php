@@ -250,7 +250,8 @@ if (!is_dir(DOWNLOADS_DIR)) {
 }
 
 // ── 100.se: extrahera HLS-ström från BunnyCDN ─
-function extract_100se(string $pageUrl): array {
+// Returnerar null om sidan inte gick att hämta, annars de fält som hittades.
+function extract_100se(string $pageUrl): ?array {
     $html = false;
 
     if (function_exists('curl_init')) {
@@ -284,7 +285,7 @@ function extract_100se(string $pageUrl): array {
         $html = @file_get_contents($pageUrl, false, $ctx);
     }
 
-    if (!$html) return [];
+    if (!$html) return null;
 
     $result = [];
 
@@ -361,8 +362,23 @@ $downloadTitle = null;
 $downloadDesc  = null;
 $downloadImage = null;
 $scrapeStart = microtime(true);
-if (str_contains($url, '100.se')) {
+// Värdnamn är skiftlägesokänsliga — jämför på normaliserad host, inte hela URL:en.
+$host = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
+if ($host === '100.se' || str_ends_with($host, '.100.se')) {
     $extracted = extract_100se($url);
+
+    // yt-dlp saknar extraktor för 100.se — utan en Bunny-URL skulle jobbet bara
+    // dö med "Unsupported URL". Ge ett begripligt fel direkt i stället.
+    if (empty($extracted['url'])) {
+        // Utan curl faller hämtningen tillbaka på file_get_contents(), som brukar
+        // misslyckas i Web Stations PHP-profiler — säg det rakt ut.
+        echo json_encode(['success' => false, 'error' => $extracted === null
+            ? 'Kunde inte hämta sidan från 100.se.'
+              . (function_exists('curl_init') ? '' : ' PHP-tillägget curl är inte påslaget i webbplatsens PHP-profil.')
+            : 'Hittade ingen ljudström på 100.se-sidan – klistra in en direktlänk till strömmen i stället.']);
+        exit;
+    }
+
     if (!empty($extracted['url']))         $url           = $extracted['url'];
     if (!empty($extracted['title']))       $downloadTitle = $extracted['title'];
     if (!empty($extracted['description'])) $downloadDesc  = $extracted['description'];
