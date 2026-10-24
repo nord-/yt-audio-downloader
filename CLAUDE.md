@@ -1,6 +1,6 @@
 # 100procent – ljud-nedladdare med RSS-flöde
 
-En webbapp för Synology NAS (Apache + PHP 8) som extraherar ljud från videolänkar via yt-dlp och exponerar resultatet både som webblista och som podcast-RSS.
+En webbapp för Synology NAS (Web Station: nginx + PHP 8.2 via php-fpm) som extraherar ljud från videolänkar via yt-dlp och exponerar resultatet både som webblista och som podcast-RSS.
 
 ## Arkitektur
 
@@ -66,6 +66,25 @@ define('DOWNLOADS_URL', 'downloads');
 
 Verifiera med `which yt-dlp` och `/var/packages/ffmpeg7/target/bin/ffmpeg -version` på NAS:en. Sökvägarna är **duplicerade** mellan `index.php` och `download.php` – om de ändras måste båda filer uppdateras.
 
+## NAS: åtkomst, PHP och driftsättning
+
+- **SSH:** `ssh synstation` (alias i `~/.ssh/config` → `rickard@synstation.nord.cc`, nyckel `~/.ssh/synstation`).
+- **Webbrot:** `/volume1/web/100procent`. Den är **inte** en git-klon – en merge till `master` hamnar inte på NAS:en av sig själv.
+- **Webbplatsen** är alias-portalen `100` i Web Station. Inifrån NAS:en nås den på `http://localhost/100/`.
+- **Två PHP-versioner:**
+  - Webben (`index.php`, `download.php`, `rss.php`) kör php82-fpm med Web Station-profilen **`100procent`** (PHP 8.2).
+  - `worker.php` startas av `nohup php` och kör därför CLI-PHP `/usr/bin/php` (8.1). `php82` finns som `/usr/local/bin/php82` men ligger inte i PATH.
+- **PHP-profilen måste ha `curl` och `openssl` påslagna.** Utan `curl` faller `extract_100se()` tillbaka på `file_get_contents()`, som misslyckas direkt i Web Station. Då visas "Kunde inte hämta sidan från 100.se." (tidigare "Unsupported URL" från yt-dlp). `dom` och `fileinfo` är inkompilerade i Synologys php82 och syns inte i profilens lista. **Kontrollera profilen efter varje PHP- eller DSM-uppgradering:** vid uppgraderingen 8.0 → 8.2 (2026-10-22) flyttade Web Station webbplatsen till en standardprofil utan tillägg.
+- **Web Station-konfiguration** (läsbar via SSH) finns i `/usr/syno/etc/packages/WebStation/`. `Service.json` anger webbplatsens profil-id, `PHPSettings.json` profilerna och deras tillägg, `Portal.json` alias-portalen.
+- **Driftsätta en fil:**
+  1. Ta ut filen ur git med LF-radslut.
+  2. Skicka den med `ssh synstation "cat > /volume1/web/100procent/.<fil>.new"`.
+  3. Kör `php82 -l` på den.
+  4. Sätt `chmod 555` (filerna är `r-xr-xr-x`) och `mv -f` den över originalet.
+  5. Jämför med `sha256sum`.
+
+  `scp` fungerar inte mot `/volume1/...`, eftersom Synologys SFTP bara ser delade mappar. Spara säkerhetskopior i `~/100procent-backup/`, inte i webbroten där de går att hämta.
+
 ## Filformat
 
 - **Accepterade i listning och RSS**: `mp3`, `m4a`, `ogg`, `opus`, `wav`
@@ -91,7 +110,8 @@ tail -f downloads/.<jobId>.log
 ## Begränsningar
 
 - `exec` / `shell_exec` måste vara tillåtet i PHP (kolla `disable_functions`).
-- Apache-användaren `http` behöver skrivrättigheter till projektroten (downloads/ skapas runtime).
+- Webbserverns användare `http` behöver skrivrättigheter till projektroten (downloads/ skapas runtime).
+- PHP-tillägget `curl` måste vara påslaget i Web Station-profilen – annars fungerar inte 100.se-skrapningen (se "NAS: åtkomst, PHP och driftsättning").
 - **Ingen autentisering** – exponera inte publikt utan lösenordsskydd/VPN.
 - `--no-playlist` satt i yt-dlp – playlists stöds inte.
 - 100.se-scrapern är bräcklig: om deras HTML-struktur (og:image/og:title meta-tags med BunnyCDN-URL) ändras slutar detekteringen fungera och man måste mata in en direkt-URL.
